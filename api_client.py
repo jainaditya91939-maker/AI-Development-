@@ -1,9 +1,13 @@
+import os
 import re
 import requests
 from difflib import SequenceMatcher
 
 
-BACKEND_URL = "http://127.0.0.1:8000"
+BACKEND_URL = os.getenv(
+    "BACKEND_URL",
+    "http://127.0.0.1:8000"
+)
 
 
 # ==========================================
@@ -42,15 +46,6 @@ def normalize_supplier_name(name: str) -> str:
     """
     Normalize supplier names so that small
     English/Hindi/Hinglish variations can match.
-
-    Examples:
-
-    ABC Electricals
-    abc electricals
-    ABC Electrical
-    एबीसी इलेक्ट्रिकल
-
-    can be treated as the same supplier.
     """
 
     if not name:
@@ -65,13 +60,10 @@ def normalize_supplier_name(name: str) -> str:
     hindi_aliases = {
         "एबीसी": "abc",
         "ए बी सी": "abc",
-
         "इलेक्ट्रिकल": "electrical",
         "इलेक्ट्रिकल्स": "electricals",
-
         "इलेक्ट्रिक": "electric",
         "इलेक्ट्रिक्स": "electrics",
-
         "एलईडी": "led",
         "डीसी": "dc",
         "एसी": "ac",
@@ -113,13 +105,9 @@ def normalize_supplier_name(name: str) -> str:
 def supplier_similarity(name1: str, name2: str) -> float:
     """
     Calculate similarity between two supplier names.
-
     Handles small differences such as:
-
     Electrical
     Electricals
-
-    and Hindi speech-recognition variations.
     """
 
     a = normalize_supplier_name(name1)
@@ -129,10 +117,12 @@ def supplier_similarity(name1: str, name2: str) -> float:
         return 0.0
 
     # Exact normalized match
+
     if a == b:
         return 1.0
 
     # Direct similarity
+
     direct_score = SequenceMatcher(
         None,
         a,
@@ -149,9 +139,11 @@ def supplier_similarity(name1: str, name2: str) -> float:
     token_scores = []
 
     for token_a in a_tokens:
+
         best_token_score = 0.0
 
         for token_b in b_tokens:
+
             score = SequenceMatcher(
                 None,
                 token_a,
@@ -190,8 +182,6 @@ def find_supplier(supplier_name: str, suppliers):
     1. Exact name
     2. Normalized exact name
     3. High-confidence fuzzy match
-
-    This prevents random suppliers from being selected.
     """
 
     if not supplier_name:
@@ -204,6 +194,7 @@ def find_supplier(supplier_name: str, suppliers):
     # ------------------------------------------
 
     for supplier in suppliers:
+
         db_name = str(
             supplier.get("name", "")
         ).strip()
@@ -220,6 +211,7 @@ def find_supplier(supplier_name: str, suppliers):
     )
 
     for supplier in suppliers:
+
         db_name = str(
             supplier.get("name", "")
         )
@@ -241,6 +233,7 @@ def find_supplier(supplier_name: str, suppliers):
     matches = []
 
     for supplier in suppliers:
+
         db_name = str(
             supplier.get("name", "")
         )
@@ -295,6 +288,7 @@ def send_transaction(transaction):
     # ------------------------------------------
 
     if supplier is None:
+
         return {
             "status": "SUPPLIER_NOT_FOUND",
             "message": (
@@ -333,6 +327,7 @@ def send_transaction(transaction):
     # ------------------------------------------
 
     if response.status_code == 409:
+
         return {
             "status": "DUPLICATE_TRANSACTION",
             "message": "Duplicate transaction detected"
