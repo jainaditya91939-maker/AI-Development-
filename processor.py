@@ -1,12 +1,17 @@
+from datetime import date
+
 from ai_extractor import extract_transaction
 from invoice_extractor import extract_invoice
-
 from api_client import send_transaction
 
 
 def process_transaction(text: str):
-
     transaction = extract_transaction(text)
+
+    # If the user did not mention a date,
+    # use today's date for a voice transaction.
+    if transaction.transaction_date is None:
+        transaction.transaction_date = date.today()
 
     missing_fields = []
 
@@ -15,9 +20,6 @@ def process_transaction(text: str):
 
     if transaction.amount is None:
         missing_fields.append("amount")
-
-    if transaction.transaction_date is None:
-        missing_fields.append("transaction date")
 
     if missing_fields:
         return {
@@ -46,7 +48,6 @@ def process_transaction(text: str):
 
 
 def process_invoice(image_path: str):
-
     transaction = extract_invoice(image_path)
 
     missing_fields = []
