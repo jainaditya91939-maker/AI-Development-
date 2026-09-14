@@ -127,7 +127,7 @@ User message:
 """
 
     response = client.chat.completions.create(
-        model="google/gemini-2.5-flash",
+        model="openrouter/free",
 
         # Keep this below the remaining OpenRouter credits.
         max_tokens=100,
