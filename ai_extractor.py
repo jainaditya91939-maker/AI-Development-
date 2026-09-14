@@ -26,10 +26,6 @@ client = OpenAI(
 # ==========================================
 
 def has_explicit_date(text: str) -> bool:
-    """
-    Check whether the user explicitly mentioned
-    a transaction date.
-    """
 
     date_pattern = re.compile(
         r"""
@@ -52,7 +48,7 @@ def has_explicit_date(text: str) -> bool:
             (?:
                 january|february|march|april|may|june|
                 july|august|september|october|november|december|
-                jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec
+                jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
             )
             \s+\d{1,2},?\s+\d{4}\b
 
@@ -133,9 +129,8 @@ User message:
     response = client.chat.completions.create(
         model="google/gemini-2.5-flash",
 
-        # OpenRouter currently has very low remaining credits.
-        # 120 tokens is enough for this small JSON response.
-        max_tokens=120,
+        # Keep this below the remaining OpenRouter credits.
+        max_tokens=100,
 
         messages=[
             {
@@ -167,6 +162,7 @@ User message:
     # ==========================================
 
     if transaction.amount is not None:
+
         if transaction.amount <= 0:
             transaction.amount = None
 
