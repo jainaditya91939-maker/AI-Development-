@@ -4,13 +4,8 @@ import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
-
 from schemas import Transaction
 
-
-# ==========================================
-# OPENROUTER SETUP
-# ==========================================
 
 load_dotenv()
 
@@ -21,10 +16,6 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1"
 )
 
-
-# ==========================================
-# PLACEHOLDER SUPPLIER NAME CHECK
-# ==========================================
 
 def clean_supplier_name(name):
     if name is None:
@@ -55,10 +46,6 @@ def clean_supplier_name(name):
     return name.strip()
 
 
-# ==========================================
-# DATE SAFETY
-# ==========================================
-
 def has_valid_date(value):
     if not value:
         return False
@@ -67,32 +54,26 @@ def has_valid_date(value):
         r"^\d{4}-\d{2}-\d{2}$"
     )
 
-    return bool(pattern.match(str(value)))
+    return bool(
+        pattern.match(str(value))
+    )
 
-
-# ==========================================
-# INVOICE EXTRACTION
-# ==========================================
 
 def extract_invoice(image_path: str) -> Transaction:
 
-    # ==========================================
-    # READ IMAGE
-    # ==========================================
+    with open(
+        image_path,
+        "rb"
+    ) as image_file:
 
-    with open(image_path, "rb") as image_file:
         image_data = base64.b64encode(
             image_file.read()
         ).decode("utf-8")
 
-    # ==========================================
-    # SHORT, FOCUSED PROMPT
-    # ==========================================
-
     prompt = """
-You are extracting data from an Indian GST/tax invoice.
+You are an invoice extraction system.
 
-Inspect the entire invoice image carefully.
+Carefully inspect the ENTIRE invoice image.
 
 Return ONLY valid JSON with exactly these fields:
 
@@ -109,60 +90,91 @@ Return ONLY valid JSON with exactly these fields:
 Rules:
 
 1. transaction_type:
-   Use PURCHASE for a normal sales/purchase invoice.
-   Other allowed values are PAYMENT, RETURN, CREDIT_NOTE.
+   Use PURCHASE for a normal invoice.
+   Other allowed values:
+   PAYMENT, RETURN, CREDIT_NOTE.
 
 2. supplier_name:
-   Extract the REAL company that issued the invoice.
-   Do NOT use the customer/buyer name.
+   Extract the REAL SELLER / SUPPLIER
+   that issued the invoice.
+
+   Do NOT use the buyer/customer name.
+
    Do NOT use placeholder text such as:
-   "Add Company Name", "Company Name", "Supplier Name",
-   "Your Company", "Enter Company Name".
+   "Add Company Name",
+   "Company Name",
+   "Supplier Name",
+   "Your Company",
+   "Enter Company Name".
+
    If unclear, use null.
 
 3. amount:
-   Use the FINAL invoice total / grand total / total payable.
-   Do NOT use subtotal, item amount, tax amount or discount.
+   Extract the FINAL GRAND TOTAL / TOTAL PAYABLE.
+
+   Do NOT use:
+   subtotal,
+   individual item amount,
+   tax amount,
+   discount.
+
    Return only the numeric value.
 
 4. transaction_date:
-   Use the INVOICE DATE only.
-   Do NOT use due date, delivery date or e-way bill date.
-   Convert to YYYY-MM-DD.
+   Extract the INVOICE DATE.
+
+   Do NOT use:
+   due date,
+   delivery date,
+   e-way bill date.
+
+   Convert the date to:
+
+   YYYY-MM-DD
+
    If unclear, use null.
 
 5. reference_number:
-   Use the INVOICE NUMBER.
-   Do NOT use IRN, Ack No. or e-way bill number.
+   Extract the INVOICE NUMBER.
+
+   Do NOT use:
+   IRN,
+   Ack No.,
+   e-way bill number.
+
    If unclear, use null.
 
 6. payment_status:
-   Extract only if clearly stated.
-   Otherwise null.
+   Extract only if clearly written.
+   Otherwise use null.
 
 7. notes:
-   Only include useful additional invoice information.
-   Otherwise null.
+   Add useful invoice information only.
+   Otherwise use null.
 
 8. Never invent information.
+
 9. Do not calculate balances.
+
 10. Do not modify any database.
-11. Understand Indian invoices, GST, INR and English/Hindi/Hinglish.
+
+11. Understand Indian GST invoices,
+    INR currency and Indian company names.
 
 IMPORTANT:
-The final total is the amount to extract.
-The invoice date is the transaction date.
+
 The seller/issuer is the supplier.
+
+The invoice date is the transaction date.
+
+The final grand total is the transaction amount.
+
+The invoice number is the reference number.
 """
 
-
-    # ==========================================
-    # FREE OPENROUTER MODEL
-    # ==========================================
-
     response = client.chat.completions.create(
-        model="openrouter/free",
-        max_tokens=180,
+        model="google/gemma-4-26b-a4b-it:free",
+        max_tokens=300,
         messages=[
             {
                 "role": "user",
@@ -187,11 +199,6 @@ The seller/issuer is the supplier.
         }
     )
 
-
-    # ==========================================
-    # GET AI RESPONSE
-    # ==========================================
-
     data = response.choices[0].message.content
 
     if not data:
@@ -199,28 +206,13 @@ The seller/issuer is the supplier.
             "Invoice extractor returned empty response"
         )
 
-
-    # ==========================================
-    # JSON → TRANSACTION
-    # ==========================================
-
     transaction = Transaction.model_validate_json(
         data
     )
 
-
-    # ==========================================
-    # SUPPLIER SAFETY
-    # ==========================================
-
     transaction.supplier_name = clean_supplier_name(
         transaction.supplier_name
     )
-
-
-    # ==========================================
-    # DATE SAFETY
-    # ==========================================
 
     if transaction.transaction_date is not None:
 
@@ -229,15 +221,9 @@ The seller/issuer is the supplier.
         ):
             transaction.transaction_date = None
 
-
-    # ==========================================
-    # AMOUNT SAFETY
-    # ==========================================
-
     if transaction.amount is not None:
 
         if transaction.amount <= 0:
             transaction.amount = None
-
 
     return transaction
