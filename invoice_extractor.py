@@ -1,11 +1,16 @@
 import os
 import base64
+import re
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from schemas import Transaction
 
+
+# ==========================================
+# OPENROUTER SETUP
+# ==========================================
 
 load_dotenv()
 
@@ -25,7 +30,9 @@ def clean_supplier_name(name):
     if name is None:
         return None
 
-    cleaned = " ".join(name.strip().lower().split())
+    cleaned = " ".join(
+        name.strip().lower().split()
+    )
 
     placeholder_names = {
         "add company name",
@@ -49,289 +56,121 @@ def clean_supplier_name(name):
 
 
 # ==========================================
+# DATE SAFETY
+# ==========================================
+
+def has_valid_date(value):
+    if not value:
+        return False
+
+    pattern = re.compile(
+        r"^\d{4}-\d{2}-\d{2}$"
+    )
+
+    return bool(pattern.match(str(value)))
+
+
+# ==========================================
 # INVOICE EXTRACTION
 # ==========================================
 
 def extract_invoice(image_path: str) -> Transaction:
 
-    # Read invoice image
-    with open(image_path, "rb") as image_file:
+    # ==========================================
+    # READ IMAGE
+    # ==========================================
 
+    with open(image_path, "rb") as image_file:
         image_data = base64.b64encode(
             image_file.read()
         ).decode("utf-8")
 
+    # ==========================================
+    # SHORT, FOCUSED PROMPT
+    # ==========================================
 
     prompt = """
-You are an AI invoice extraction system.
+You are extracting data from an Indian GST/tax invoice.
 
-Carefully inspect the ENTIRE invoice image before answering.
+Inspect the entire invoice image carefully.
 
-Extract information from the invoice and return ONLY valid JSON.
-
-Required JSON fields:
+Return ONLY valid JSON with exactly these fields:
 
 {
-    "transaction_type": "PURCHASE",
-    "supplier_name": "...",
-    "amount": 0,
-    "payment_status": null,
-    "transaction_date": "YYYY-MM-DD",
-    "reference_number": "...",
-    "notes": null
+  "transaction_type": "PURCHASE",
+  "supplier_name": null,
+  "amount": null,
+  "payment_status": null,
+  "transaction_date": null,
+  "reference_number": null,
+  "notes": null
 }
 
+Rules:
 
-==========================================
-TRANSACTION TYPE
-==========================================
-
-1. transaction_type must be one of:
-
-   PURCHASE
-   PAYMENT
-   RETURN
-   CREDIT_NOTE
-
-
-For a normal purchase invoice, use:
-
-PURCHASE
-
-
-==========================================
-SUPPLIER NAME
-==========================================
+1. transaction_type:
+   Use PURCHASE for a normal sales/purchase invoice.
+   Other allowed values are PAYMENT, RETURN, CREDIT_NOTE.
 
 2. supplier_name:
-
-Extract the REAL company/supplier issuing the invoice.
-
-IMPORTANT:
-
-Some invoice templates contain placeholder text such as:
-
-- "Add Company Name"
-- "Add Name"
-- "Company Name"
-- "Add Company"
-- "Your Company Name"
-- "Enter Company Name"
-- "Supplier Name"
-
-These are NOT real supplier names.
-
-If the invoice only contains placeholder company information,
-return:
-
-"supplier_name": null
-
-Do NOT treat placeholder text as the supplier.
-
-Do NOT use:
-
-- customer/buyer name
-- billing customer name
-- shipping customer name
-- transporter name
-- bank account name
-- placeholder company name
-
-
-==========================================
-AMOUNT
-==========================================
+   Extract the REAL company that issued the invoice.
+   Do NOT use the customer/buyer name.
+   Do NOT use placeholder text such as:
+   "Add Company Name", "Company Name", "Supplier Name",
+   "Your Company", "Enter Company Name".
+   If unclear, use null.
 
 3. amount:
-
-THIS IS VERY IMPORTANT.
-
-Find the FINAL TOTAL of the invoice.
-
-Look carefully at the bottom total section.
-
-Use the amount next to:
-
-- "Total"
-- "Grand Total"
-- "Total Amount"
-- "Total Payable"
-- equivalent final-total wording
-
-DO NOT use:
-
-- individual item amount
-- list price
-- discount amount
-- tax amount
-- subtotal
-- amount already paid
-- settled amount
-- invoice balance
-
-Example:
-
-If the invoice shows:
-
-Total = ₹1,16,800.00
-
-then:
-
-"amount": 116800.00
-
-Remove:
-
-- currency symbols
-- commas
-
-from the numeric value.
-
-
-==========================================
-TRANSACTION DATE
-==========================================
+   Use the FINAL invoice total / grand total / total payable.
+   Do NOT use subtotal, item amount, tax amount or discount.
+   Return only the numeric value.
 
 4. transaction_date:
-
-Extract the INVOICE DATE.
-
-Do NOT use:
-
-- due date
-- delivery date
-- transporter date
-- transporter document date
-- E-way bill date
-- E-way bill document date
-
-Convert the invoice date to:
-
-YYYY-MM-DD
-
-Example:
-
-22-Apr-25
-
-becomes:
-
-2025-04-22
-
-
-==========================================
-REFERENCE NUMBER
-==========================================
+   Use the INVOICE DATE only.
+   Do NOT use due date, delivery date or e-way bill date.
+   Convert to YYYY-MM-DD.
+   If unclear, use null.
 
 5. reference_number:
-
-Extract the INVOICE NUMBER.
-
-Do NOT use:
-
-- IRN
-- Ack No.
-- transporter document number
-- E-way bill number
-
-Example:
-
-Invoice Number: PPP/0001/25-26
-
-becomes:
-
-"reference_number": "PPP/0001/25-26"
-
-
-==========================================
-PAYMENT STATUS
-==========================================
+   Use the INVOICE NUMBER.
+   Do NOT use IRN, Ack No. or e-way bill number.
+   If unclear, use null.
 
 6. payment_status:
-
-Extract it only if clearly mentioned.
-
-If it is not clearly mentioned:
-
-"payment_status": null
-
-
-==========================================
-NOTES
-==========================================
+   Extract only if clearly stated.
+   Otherwise null.
 
 7. notes:
+   Only include useful additional invoice information.
+   Otherwise null.
 
-Include useful additional invoice information only if necessary.
+8. Never invent information.
+9. Do not calculate balances.
+10. Do not modify any database.
+11. Understand Indian invoices, GST, INR and English/Hindi/Hinglish.
 
-Otherwise:
-
-"notes": null
-
-
-==========================================
-GENERAL SAFETY
-==========================================
-
-8. Do NOT invent information.
-
-If a field truly does not exist, return null.
-
-9. Understand:
-
-- Indian invoices
-- GST invoices
-- Indian Rupee (₹)
-- Indian date formats
-- English
-- Hindi
-- Hinglish
-
-10. Do NOT calculate pending balances.
-
-11. Do NOT modify any database.
-
-
-==========================================
-FINAL INSPECTION
-==========================================
-
-12. Before producing the JSON, carefully inspect:
-
-- invoice header
-- supplier/company name
-- invoice number
-- invoice date
-- complete item section
-- discount
-- taxes
-- final total section
-- payment/settlement information
-
-13. The FINAL TOTAL is more important than any
-individual amount shown elsewhere on the invoice.
-
-14. If the company name is only placeholder text,
-supplier_name MUST be null.
-
-15. Return ONLY the JSON object.
+IMPORTANT:
+The final total is the amount to extract.
+The invoice date is the transaction date.
+The seller/issuer is the supplier.
 """
 
 
+    # ==========================================
+    # FREE OPENROUTER MODEL
+    # ==========================================
+
     response = client.chat.completions.create(
-
-        model="google/gemini-2.5-flash",
-
-        max_tokens=200,
-
+        model="openrouter/free",
+        max_tokens=180,
         messages=[
             {
                 "role": "user",
                 "content": [
-
                     {
                         "type": "text",
                         "text": prompt
                     },
-
                     {
                         "type": "image_url",
                         "image_url": {
@@ -340,32 +179,65 @@ supplier_name MUST be null.
                             )
                         }
                     }
-
                 ]
             }
         ],
-
         response_format={
             "type": "json_object"
         }
     )
 
 
-    # Get AI response
+    # ==========================================
+    # GET AI RESPONSE
+    # ==========================================
+
     data = response.choices[0].message.content
 
-
-    # Convert JSON → Transaction
-    transaction = Transaction.model_validate_json(data)
+    if not data:
+        raise ValueError(
+            "Invoice extractor returned empty response"
+        )
 
 
     # ==========================================
-    # FINAL SUPPLIER SAFETY CHECK
+    # JSON → TRANSACTION
+    # ==========================================
+
+    transaction = Transaction.model_validate_json(
+        data
+    )
+
+
+    # ==========================================
+    # SUPPLIER SAFETY
     # ==========================================
 
     transaction.supplier_name = clean_supplier_name(
         transaction.supplier_name
     )
+
+
+    # ==========================================
+    # DATE SAFETY
+    # ==========================================
+
+    if transaction.transaction_date is not None:
+
+        if not has_valid_date(
+            transaction.transaction_date
+        ):
+            transaction.transaction_date = None
+
+
+    # ==========================================
+    # AMOUNT SAFETY
+    # ==========================================
+
+    if transaction.amount is not None:
+
+        if transaction.amount <= 0:
+            transaction.amount = None
 
 
     return transaction
