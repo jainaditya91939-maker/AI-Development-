@@ -1,5 +1,7 @@
 import os
 import base64
+import json
+import mimetypes
 import re
 
 from dotenv import load_dotenv
@@ -15,6 +17,9 @@ client = OpenAI(
     api_key=api_key,
     base_url="https://openrouter.ai/api/v1"
 )
+
+
+MODEL = "google/gemma-4-31b-it:free"
 
 
 def clean_supplier_name(name):
@@ -59,7 +64,74 @@ def has_valid_date(value):
     )
 
 
+def get_image_mime_type(image_path):
+    mime_type, _ = mimetypes.guess_type(
+        image_path
+    )
+
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    }
+
+    if mime_type in allowed_types:
+        return mime_type
+
+    return "image/jpeg"
+
+
+def extract_json_text(text):
+    if not text:
+        return None
+
+    text = text.strip()
+
+    if text.startswith("```"):
+        text = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            text,
+            flags=re.IGNORECASE
+        )
+
+        text = re.sub(
+            r"\s*```$",
+            "",
+            text
+        )
+
+        text = text.strip()
+
+    try:
+        json.loads(text)
+        return text
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(
+        r"\{.*\}",
+        text,
+        re.DOTALL
+    )
+
+    if match:
+        candidate = match.group(0)
+
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            return None
+
+    return None
+
+
 def extract_invoice(image_path: str) -> Transaction:
+
+    mime_type = get_image_mime_type(
+        image_path
+    )
 
     with open(
         image_path,
@@ -71,11 +143,11 @@ def extract_invoice(image_path: str) -> Transaction:
         ).decode("utf-8")
 
     prompt = """
-You are an invoice extraction system.
+Extract information from this Indian GST invoice.
 
-Carefully inspect the ENTIRE invoice image.
+Return ONLY JSON.
 
-Return ONLY valid JSON with exactly these fields:
+Required fields:
 
 {
   "transaction_type": "PURCHASE",
@@ -89,92 +161,28 @@ Return ONLY valid JSON with exactly these fields:
 
 Rules:
 
-1. transaction_type:
-   Use PURCHASE for a normal invoice.
-   Other allowed values:
-   PAYMENT, RETURN, CREDIT_NOTE.
+- supplier_name = seller/company that issued the invoice.
+- Do NOT use the buyer/customer as supplier.
+- amount = final grand total / total payable.
+- Do NOT use subtotal or individual item amount.
+- transaction_date = invoice date only.
+- Convert date to YYYY-MM-DD.
+- reference_number = invoice number.
+- Do NOT use IRN, Ack No. or e-way bill number.
+- payment_status = only if explicitly stated.
+- Use null when information is unclear.
+- Never invent information.
+- transaction_type should normally be PURCHASE.
+- Do not calculate balances.
+- Do not modify any database.
 
-2. supplier_name:
-   Extract the REAL SELLER / SUPPLIER
-   that issued the invoice.
-
-   Do NOT use the buyer/customer name.
-
-   Do NOT use placeholder text such as:
-   "Add Company Name",
-   "Company Name",
-   "Supplier Name",
-   "Your Company",
-   "Enter Company Name".
-
-   If unclear, use null.
-
-3. amount:
-   Extract the FINAL GRAND TOTAL / TOTAL PAYABLE.
-
-   Do NOT use:
-   subtotal,
-   individual item amount,
-   tax amount,
-   discount.
-
-   Return only the numeric value.
-
-4. transaction_date:
-   Extract the INVOICE DATE.
-
-   Do NOT use:
-   due date,
-   delivery date,
-   e-way bill date.
-
-   Convert the date to:
-
-   YYYY-MM-DD
-
-   If unclear, use null.
-
-5. reference_number:
-   Extract the INVOICE NUMBER.
-
-   Do NOT use:
-   IRN,
-   Ack No.,
-   e-way bill number.
-
-   If unclear, use null.
-
-6. payment_status:
-   Extract only if clearly written.
-   Otherwise use null.
-
-7. notes:
-   Add useful invoice information only.
-   Otherwise use null.
-
-8. Never invent information.
-
-9. Do not calculate balances.
-
-10. Do not modify any database.
-
-11. Understand Indian GST invoices,
-    INR currency and Indian company names.
-
-IMPORTANT:
-
-The seller/issuer is the supplier.
-
-The invoice date is the transaction date.
-
-The final grand total is the transaction amount.
-
-The invoice number is the reference number.
+Inspect the complete invoice image carefully.
 """
 
     response = client.chat.completions.create(
-        model="google/gemma-4-26b-a4b-it:free",
-        max_tokens=300,
+        model=MODEL,
+        max_tokens=400,
+        temperature=0,
         messages=[
             {
                 "role": "user",
@@ -187,7 +195,8 @@ The invoice number is the reference number.
                         "type": "image_url",
                         "image_url": {
                             "url": (
-                                f"data:image/jpeg;base64,{image_data}"
+                                f"data:{mime_type};base64,"
+                                f"{image_data}"
                             )
                         }
                     }
@@ -199,15 +208,60 @@ The invoice number is the reference number.
         }
     )
 
-    data = response.choices[0].message.content
+    choice = response.choices[0]
+
+    message = choice.message
+
+    data = message.content
+
+    print(
+        "Invoice model:",
+        MODEL
+    )
+
+    print(
+        "Invoice finish reason:",
+        getattr(
+            choice,
+            "finish_reason",
+            None
+        )
+    )
+
+    print(
+        "Invoice response content:",
+        repr(data)
+    )
 
     if not data:
+
+        print(
+            "Invoice full response:",
+            response.model_dump()
+        )
+
         raise ValueError(
-            "Invoice extractor returned empty response"
+            "Invoice AI returned an empty response. "
+            "Check Render logs for the full model response."
+        )
+
+    json_text = extract_json_text(
+        data
+    )
+
+    if json_text is None:
+
+        print(
+            "Invoice non-JSON response:",
+            repr(data)
+        )
+
+        raise ValueError(
+            "Invoice AI returned invalid JSON."
         )
 
     transaction = Transaction.model_validate_json(
-        data
+        json_text
     )
 
     transaction.supplier_name = clean_supplier_name(
