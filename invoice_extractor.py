@@ -3,7 +3,6 @@ import base64
 import json
 import mimetypes
 import re
-import time
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -20,7 +19,7 @@ client = OpenAI(
 )
 
 
-MODEL = "openrouter/free"
+MODEL = "inclusionai/ling-3.0-flash-vl:free"
 
 
 def clean_supplier_name(name):
@@ -130,15 +129,28 @@ def extract_json(text):
     return None
 
 
-def build_prompt():
-    return """
-You are an Indian GST invoice extraction system.
+def extract_invoice(image_path: str) -> Transaction:
 
-Carefully inspect the complete invoice image.
+    with open(
+        image_path,
+        "rb"
+    ) as image_file:
 
-Return ONLY one JSON object.
+        image_data = base64.b64encode(
+            image_file.read()
+        ).decode("utf-8")
 
-Use exactly these fields:
+    mime_type = get_mime_type(
+        image_path
+    )
+
+    prompt = """
+Read this invoice image carefully.
+
+Return ONLY valid JSON.
+Do not write anything before or after the JSON.
+
+Required format:
 
 {
   "transaction_type": "PURCHASE",
@@ -150,57 +162,50 @@ Use exactly these fields:
   "notes": null
 }
 
-Rules:
+Extraction rules:
 
-1. supplier_name:
-   Extract the SELLER / ISSUER of the invoice.
-   Do NOT use the buyer/customer name.
+supplier_name:
+Use the seller/company that issued the invoice.
+Do NOT use the buyer/customer.
 
-2. amount:
-   Extract the FINAL GRAND TOTAL / TOTAL PAYABLE.
-   Do NOT use subtotal.
-   Do NOT use an individual item amount.
-   Do NOT use only the tax amount.
+amount:
+Use the final GRAND TOTAL or TOTAL PAYABLE.
+Do NOT use subtotal or tax-only amount.
 
-3. transaction_date:
-   Extract the INVOICE DATE.
-   Do NOT use due date or delivery date.
-   Convert it to YYYY-MM-DD.
+transaction_date:
+Use the invoice date.
+Convert it to YYYY-MM-DD.
 
-4. reference_number:
-   Extract the INVOICE NUMBER.
-   Do NOT use IRN, Ack No. or e-way bill number.
+reference_number:
+Use the invoice number.
+Do NOT use IRN, Ack number or e-way bill number.
 
-5. transaction_type:
-   Use PURCHASE for a normal invoice.
+transaction_type:
+Use PURCHASE for a normal sales invoice.
 
-6. payment_status:
-   Only extract it when explicitly written.
-   Otherwise use null.
+payment_status:
+Use only if explicitly written.
+Otherwise null.
 
-7. notes:
-   Use null unless useful information is clearly present.
+notes:
+Use null unless useful information is clearly visible.
 
-8. Never invent information.
-   Use null when something cannot be read.
+Never invent information.
+If something cannot be read, use null.
 
-9. Do not calculate balances.
+Example:
 
-10. Do not modify any database.
-
-Important:
-Seller = supplier.
-Invoice date = transaction date.
-Grand total = transaction amount.
-Invoice number = reference number.
+{
+  "transaction_type": "PURCHASE",
+  "supplier_name": "Sharma Electricals",
+  "amount": 35931,
+  "payment_status": null,
+  "transaction_date": "2025-09-12",
+  "reference_number": "SE/25-26/0147",
+  "notes": null
+}
 """
 
-
-def call_invoice_model(
-    image_data,
-    mime_type,
-    prompt
-):
     response = client.chat.completions.create(
         model=MODEL,
         max_tokens=500,
@@ -229,7 +234,7 @@ def call_invoice_model(
 
     if not response.choices:
         raise ValueError(
-            "No response choices returned"
+            "Invoice AI returned no choices"
         )
 
     choice = response.choices[0]
@@ -237,7 +242,7 @@ def call_invoice_model(
     data = choice.message.content
 
     print(
-        "INVOICE ROUTER MODEL:",
+        "INVOICE MODEL:",
         MODEL
     )
 
@@ -253,100 +258,40 @@ def call_invoice_model(
 
     if not data:
         raise ValueError(
-            "AI returned empty content"
+            "Invoice AI returned empty content"
         )
 
-    return data
-
-
-def extract_invoice(image_path: str) -> Transaction:
-
-    with open(
-        image_path,
-        "rb"
-    ) as image_file:
-
-        image_data = base64.b64encode(
-            image_file.read()
-        ).decode("utf-8")
-
-    mime_type = get_mime_type(
-        image_path
+    json_text = extract_json(
+        data
     )
 
-    prompt = build_prompt()
+    if json_text is None:
+        raise ValueError(
+            "Invoice AI returned invalid JSON"
+        )
 
-    last_error = None
-
-    # Free router can temporarily hit a busy
-    # provider. Retry a few times before failing.
-    for attempt in range(1, 4):
-
-        try:
-
-            print(
-                f"INVOICE ATTEMPT: {attempt}/3"
-            )
-
-            data = call_invoice_model(
-                image_data=image_data,
-                mime_type=mime_type,
-                prompt=prompt
-            )
-
-            json_text = extract_json(
-                data
-            )
-
-            if json_text is None:
-                raise ValueError(
-                    "AI returned invalid JSON"
-                )
-
-            transaction = (
-                Transaction.model_validate_json(
-                    json_text
-                )
-            )
-
-            transaction.supplier_name = (
-                clean_supplier_name(
-                    transaction.supplier_name
-                )
-            )
-
-            if transaction.transaction_date:
-
-                if not has_valid_date(
-                    transaction.transaction_date
-                ):
-                    transaction.transaction_date = None
-
-            if transaction.amount is not None:
-
-                if transaction.amount <= 0:
-                    transaction.amount = None
-
-            print(
-                "INVOICE EXTRACTION SUCCESS"
-            )
-
-            return transaction
-
-        except Exception as error:
-
-            last_error = error
-
-            print(
-                "INVOICE ATTEMPT FAILED:",
-                attempt,
-                str(error)
-            )
-
-            if attempt < 3:
-                time.sleep(3)
-
-    raise ValueError(
-        "Free invoice AI failed after 3 attempts. "
-        f"Last error: {last_error}"
+    transaction = (
+        Transaction.model_validate_json(
+            json_text
+        )
     )
+
+    transaction.supplier_name = (
+        clean_supplier_name(
+            transaction.supplier_name
+        )
+    )
+
+    if transaction.transaction_date:
+
+        if not has_valid_date(
+            transaction.transaction_date
+        ):
+            transaction.transaction_date = None
+
+    if transaction.amount is not None:
+
+        if transaction.amount <= 0:
+            transaction.amount = None
+
+    return transaction
