@@ -19,7 +19,7 @@ client = OpenAI(
 )
 
 
-MODEL = "google/gemma-3-27b-it:free"
+MODEL = "google/gemma-4-26b-a4b-it:free"
 
 
 def clean_supplier_name(name):
@@ -84,7 +84,6 @@ def extract_json(text):
 
     text = text.strip()
 
-    # Remove markdown code fences if model adds them.
     text = re.sub(
         r"^```json\s*",
         "",
@@ -106,14 +105,12 @@ def extract_json(text):
 
     text = text.strip()
 
-    # Direct JSON
     try:
         json.loads(text)
         return text
     except json.JSONDecodeError:
         pass
 
-    # Find JSON object inside extra text.
     match = re.search(
         r"\{.*\}",
         text,
@@ -148,11 +145,11 @@ def extract_invoice(image_path: str) -> Transaction:
     )
 
     prompt = """
-You are an Indian GST invoice data extraction system.
+You are an Indian GST invoice extraction system.
 
-Look at the complete invoice image and extract the invoice information.
+Carefully inspect the complete invoice image.
 
-Return ONLY a JSON object.
+Return ONLY one JSON object.
 
 Use exactly these fields:
 
@@ -169,45 +166,42 @@ Use exactly these fields:
 Rules:
 
 1. supplier_name:
-   The SELLER / ISSUER of the invoice.
-   Never use the buyer/customer name.
+   Extract the SELLER / ISSUER of the invoice.
+   Do NOT use the buyer/customer name.
 
 2. amount:
-   The FINAL GRAND TOTAL / TOTAL PAYABLE.
-   Do not use subtotal.
-   Do not use tax-only amount.
-   Do not use an individual item amount.
+   Extract the FINAL GRAND TOTAL / TOTAL PAYABLE.
+   Do NOT use subtotal.
+   Do NOT use an individual item amount.
+   Do NOT use only the tax amount.
 
 3. transaction_date:
-   The INVOICE DATE only.
+   Extract the INVOICE DATE.
+   Do NOT use due date or delivery date.
    Convert it to YYYY-MM-DD.
 
 4. reference_number:
-   The INVOICE NUMBER only.
-   Do not use IRN, Ack No. or e-way bill number.
+   Extract the INVOICE NUMBER.
+   Do NOT use IRN, Ack No. or e-way bill number.
 
 5. transaction_type:
-   Normally PURCHASE.
+   Use PURCHASE for a normal invoice.
 
 6. payment_status:
-   Only if explicitly written on the invoice.
-   Otherwise null.
+   Only extract it when explicitly written.
+   Otherwise use null.
 
 7. notes:
-   Only useful additional invoice information.
-   Otherwise null.
+   Use null unless useful information is clearly present.
 
-8. Never invent missing information.
-   Use null if something cannot be read.
+8. Never invent information.
+   Use null when something cannot be read.
 
-9. Do not calculate supplier balances.
+9. Do not calculate balances.
 
 10. Do not modify any database.
 
-11. Understand Indian GST invoices,
-    INR amounts and Indian company names.
-
-IMPORTANT:
+Important:
 Seller = supplier.
 Invoice date = transaction date.
 Grand total = transaction amount.
@@ -216,7 +210,7 @@ Invoice number = reference number.
 
     response = client.chat.completions.create(
         model=MODEL,
-        max_tokens=500,
+        max_tokens=400,
         temperature=0,
         messages=[
             {
@@ -245,9 +239,9 @@ Invoice number = reference number.
             "INVOICE_V2: AI returned no choices"
         )
 
-    message = response.choices[0].message
+    choice = response.choices[0]
 
-    data = message.content
+    data = choice.message.content
 
     print(
         "INVOICE_V2 MODEL:",
@@ -256,7 +250,7 @@ Invoice number = reference number.
 
     print(
         "INVOICE_V2 FINISH:",
-        response.choices[0].finish_reason
+        choice.finish_reason
     )
 
     print(
