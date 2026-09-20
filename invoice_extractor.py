@@ -3,6 +3,7 @@ import base64
 import json
 import mimetypes
 import re
+import time
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -19,7 +20,10 @@ client = OpenAI(
 )
 
 
-MODEL = "google/gemma-4-26b-a4b-it:free"
+FREE_MODELS = [
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-4-31b-it:free",
+]
 
 
 def clean_supplier_name(name):
@@ -129,22 +133,8 @@ def extract_json(text):
     return None
 
 
-def extract_invoice(image_path: str) -> Transaction:
-
-    with open(
-        image_path,
-        "rb"
-    ) as image_file:
-
-        image_data = base64.b64encode(
-            image_file.read()
-        ).decode("utf-8")
-
-    mime_type = get_mime_type(
-        image_path
-    )
-
-    prompt = """
+def build_prompt():
+    return """
 You are an Indian GST invoice extraction system.
 
 Carefully inspect the complete invoice image.
@@ -208,8 +198,15 @@ Grand total = transaction amount.
 Invoice number = reference number.
 """
 
+
+def call_free_model(
+    model,
+    image_data,
+    mime_type,
+    prompt
+):
     response = client.chat.completions.create(
-        model=MODEL,
+        model=model,
         max_tokens=400,
         temperature=0,
         messages=[
@@ -236,74 +233,123 @@ Invoice number = reference number.
 
     if not response.choices:
         raise ValueError(
-            "INVOICE_V2: AI returned no choices"
+            "No choices returned by model"
         )
 
-    choice = response.choices[0]
-
-    data = choice.message.content
+    data = response.choices[0].message.content
 
     print(
-        "INVOICE_V2 MODEL:",
-        MODEL
+        "INVOICE MODEL:",
+        model
     )
 
     print(
-        "INVOICE_V2 FINISH:",
-        choice.finish_reason
+        "INVOICE FINISH:",
+        response.choices[0].finish_reason
     )
 
     print(
-        "INVOICE_V2 CONTENT:",
+        "INVOICE CONTENT:",
         repr(data)
     )
 
     if not data:
-
-        print(
-            "INVOICE_V2 RAW RESPONSE:",
-            response.model_dump()
-        )
-
         raise ValueError(
-            "INVOICE_V2: AI returned empty content"
+            "Model returned empty content"
         )
 
-    json_text = extract_json(
-        data
+    return data
+
+
+def extract_invoice(image_path: str) -> Transaction:
+
+    with open(
+        image_path,
+        "rb"
+    ) as image_file:
+
+        image_data = base64.b64encode(
+            image_file.read()
+        ).decode("utf-8")
+
+    mime_type = get_mime_type(
+        image_path
     )
 
-    if json_text is None:
+    prompt = build_prompt()
 
-        print(
-            "INVOICE_V2 INVALID CONTENT:",
-            repr(data)
-        )
+    last_error = None
 
-        raise ValueError(
-            "INVOICE_V2: AI response was not valid JSON"
-        )
+    for model_index, model in enumerate(
+        FREE_MODELS
+    ):
 
-    transaction = Transaction.model_validate_json(
-        json_text
+        try:
+
+            data = call_free_model(
+                model=model,
+                image_data=image_data,
+                mime_type=mime_type,
+                prompt=prompt
+            )
+
+            json_text = extract_json(
+                data
+            )
+
+            if json_text is None:
+                raise ValueError(
+                    "Model returned invalid JSON"
+                )
+
+            transaction = (
+                Transaction.model_validate_json(
+                    json_text
+                )
+            )
+
+            transaction.supplier_name = (
+                clean_supplier_name(
+                    transaction.supplier_name
+                )
+            )
+
+            if transaction.transaction_date:
+
+                if not has_valid_date(
+                    transaction.transaction_date
+                ):
+                    transaction.transaction_date = None
+
+            if transaction.amount is not None:
+
+                if transaction.amount <= 0:
+                    transaction.amount = None
+
+            print(
+                "INVOICE EXTRACTION SUCCESS:",
+                model
+            )
+
+            return transaction
+
+        except Exception as error:
+
+            last_error = error
+
+            print(
+                "INVOICE MODEL FAILED:",
+                model,
+                str(error)
+            )
+
+            if model_index < len(
+                FREE_MODELS
+            ) - 1:
+
+                time.sleep(2)
+
+    raise ValueError(
+        "All free invoice vision models failed. "
+        f"Last error: {last_error}"
     )
-
-    transaction.supplier_name = (
-        clean_supplier_name(
-            transaction.supplier_name
-        )
-    )
-
-    if transaction.transaction_date:
-
-        if not has_valid_date(
-            transaction.transaction_date
-        ):
-            transaction.transaction_date = None
-
-    if transaction.amount is not None:
-
-        if transaction.amount <= 0:
-            transaction.amount = None
-
-    return transaction
