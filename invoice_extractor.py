@@ -20,10 +20,7 @@ client = OpenAI(
 )
 
 
-FREE_MODELS = [
-    "google/gemma-4-26b-a4b-it:free",
-    "google/gemma-4-31b-it:free",
-]
+MODEL = "openrouter/free"
 
 
 def clean_supplier_name(name):
@@ -199,15 +196,14 @@ Invoice number = reference number.
 """
 
 
-def call_free_model(
-    model,
+def call_invoice_model(
     image_data,
     mime_type,
     prompt
 ):
     response = client.chat.completions.create(
-        model=model,
-        max_tokens=400,
+        model=MODEL,
+        max_tokens=500,
         temperature=0,
         messages=[
             {
@@ -233,19 +229,21 @@ def call_free_model(
 
     if not response.choices:
         raise ValueError(
-            "No choices returned by model"
+            "No response choices returned"
         )
 
-    data = response.choices[0].message.content
+    choice = response.choices[0]
+
+    data = choice.message.content
 
     print(
-        "INVOICE MODEL:",
-        model
+        "INVOICE ROUTER MODEL:",
+        MODEL
     )
 
     print(
         "INVOICE FINISH:",
-        response.choices[0].finish_reason
+        choice.finish_reason
     )
 
     print(
@@ -255,7 +253,7 @@ def call_free_model(
 
     if not data:
         raise ValueError(
-            "Model returned empty content"
+            "AI returned empty content"
         )
 
     return data
@@ -280,14 +278,17 @@ def extract_invoice(image_path: str) -> Transaction:
 
     last_error = None
 
-    for model_index, model in enumerate(
-        FREE_MODELS
-    ):
+    # Free router can temporarily hit a busy
+    # provider. Retry a few times before failing.
+    for attempt in range(1, 4):
 
         try:
 
-            data = call_free_model(
-                model=model,
+            print(
+                f"INVOICE ATTEMPT: {attempt}/3"
+            )
+
+            data = call_invoice_model(
                 image_data=image_data,
                 mime_type=mime_type,
                 prompt=prompt
@@ -299,7 +300,7 @@ def extract_invoice(image_path: str) -> Transaction:
 
             if json_text is None:
                 raise ValueError(
-                    "Model returned invalid JSON"
+                    "AI returned invalid JSON"
                 )
 
             transaction = (
@@ -327,8 +328,7 @@ def extract_invoice(image_path: str) -> Transaction:
                     transaction.amount = None
 
             print(
-                "INVOICE EXTRACTION SUCCESS:",
-                model
+                "INVOICE EXTRACTION SUCCESS"
             )
 
             return transaction
@@ -338,18 +338,15 @@ def extract_invoice(image_path: str) -> Transaction:
             last_error = error
 
             print(
-                "INVOICE MODEL FAILED:",
-                model,
+                "INVOICE ATTEMPT FAILED:",
+                attempt,
                 str(error)
             )
 
-            if model_index < len(
-                FREE_MODELS
-            ) - 1:
-
-                time.sleep(2)
+            if attempt < 3:
+                time.sleep(3)
 
     raise ValueError(
-        "All free invoice vision models failed. "
+        "Free invoice AI failed after 3 attempts. "
         f"Last error: {last_error}"
     )
