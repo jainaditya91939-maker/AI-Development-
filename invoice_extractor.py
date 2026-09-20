@@ -19,7 +19,7 @@ client = OpenAI(
 )
 
 
-MODEL = "google/gemma-4-31b-it:free"
+MODEL = "google/gemma-3-27b-it:free"
 
 
 def clean_supplier_name(name):
@@ -55,60 +55,65 @@ def has_valid_date(value):
     if not value:
         return False
 
-    pattern = re.compile(
-        r"^\d{4}-\d{2}-\d{2}$"
-    )
-
     return bool(
-        pattern.match(str(value))
+        re.match(
+            r"^\d{4}-\d{2}-\d{2}$",
+            str(value)
+        )
     )
 
 
-def get_image_mime_type(image_path):
+def get_mime_type(image_path):
     mime_type, _ = mimetypes.guess_type(
         image_path
     )
 
-    allowed_types = {
+    if mime_type in [
         "image/jpeg",
         "image/png",
         "image/webp"
-    }
-
-    if mime_type in allowed_types:
+    ]:
         return mime_type
 
-    return "image/jpeg"
+    return "image/png"
 
 
-def extract_json_text(text):
+def extract_json(text):
     if not text:
         return None
 
     text = text.strip()
 
-    if text.startswith("```"):
-        text = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            text,
-            flags=re.IGNORECASE
-        )
+    # Remove markdown code fences if model adds them.
+    text = re.sub(
+        r"^```json\s*",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
 
-        text = re.sub(
-            r"\s*```$",
-            "",
-            text
-        )
+    text = re.sub(
+        r"^```\s*",
+        "",
+        text
+    )
 
-        text = text.strip()
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text
+    )
 
+    text = text.strip()
+
+    # Direct JSON
     try:
         json.loads(text)
         return text
     except json.JSONDecodeError:
         pass
 
+    # Find JSON object inside extra text.
     match = re.search(
         r"\{.*\}",
         text,
@@ -122,16 +127,12 @@ def extract_json_text(text):
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
-            return None
+            pass
 
     return None
 
 
 def extract_invoice(image_path: str) -> Transaction:
-
-    mime_type = get_image_mime_type(
-        image_path
-    )
 
     with open(
         image_path,
@@ -142,12 +143,18 @@ def extract_invoice(image_path: str) -> Transaction:
             image_file.read()
         ).decode("utf-8")
 
+    mime_type = get_mime_type(
+        image_path
+    )
+
     prompt = """
-Extract information from this Indian GST invoice.
+You are an Indian GST invoice data extraction system.
 
-Return ONLY JSON.
+Look at the complete invoice image and extract the invoice information.
 
-Required fields:
+Return ONLY a JSON object.
+
+Use exactly these fields:
 
 {
   "transaction_type": "PURCHASE",
@@ -161,27 +168,55 @@ Required fields:
 
 Rules:
 
-- supplier_name = seller/company that issued the invoice.
-- Do NOT use the buyer/customer as supplier.
-- amount = final grand total / total payable.
-- Do NOT use subtotal or individual item amount.
-- transaction_date = invoice date only.
-- Convert date to YYYY-MM-DD.
-- reference_number = invoice number.
-- Do NOT use IRN, Ack No. or e-way bill number.
-- payment_status = only if explicitly stated.
-- Use null when information is unclear.
-- Never invent information.
-- transaction_type should normally be PURCHASE.
-- Do not calculate balances.
-- Do not modify any database.
+1. supplier_name:
+   The SELLER / ISSUER of the invoice.
+   Never use the buyer/customer name.
 
-Inspect the complete invoice image carefully.
+2. amount:
+   The FINAL GRAND TOTAL / TOTAL PAYABLE.
+   Do not use subtotal.
+   Do not use tax-only amount.
+   Do not use an individual item amount.
+
+3. transaction_date:
+   The INVOICE DATE only.
+   Convert it to YYYY-MM-DD.
+
+4. reference_number:
+   The INVOICE NUMBER only.
+   Do not use IRN, Ack No. or e-way bill number.
+
+5. transaction_type:
+   Normally PURCHASE.
+
+6. payment_status:
+   Only if explicitly written on the invoice.
+   Otherwise null.
+
+7. notes:
+   Only useful additional invoice information.
+   Otherwise null.
+
+8. Never invent missing information.
+   Use null if something cannot be read.
+
+9. Do not calculate supplier balances.
+
+10. Do not modify any database.
+
+11. Understand Indian GST invoices,
+    INR amounts and Indian company names.
+
+IMPORTANT:
+Seller = supplier.
+Invoice date = transaction date.
+Grand total = transaction amount.
+Invoice number = reference number.
 """
 
     response = client.chat.completions.create(
         model=MODEL,
-        max_tokens=400,
+        max_tokens=500,
         temperature=0,
         messages=[
             {
@@ -202,73 +237,70 @@ Inspect the complete invoice image carefully.
                     }
                 ]
             }
-        ],
-        response_format={
-            "type": "json_object"
-        }
+        ]
     )
 
-    choice = response.choices[0]
+    if not response.choices:
+        raise ValueError(
+            "INVOICE_V2: AI returned no choices"
+        )
 
-    message = choice.message
+    message = response.choices[0].message
 
     data = message.content
 
     print(
-        "Invoice model:",
+        "INVOICE_V2 MODEL:",
         MODEL
     )
 
     print(
-        "Invoice finish reason:",
-        getattr(
-            choice,
-            "finish_reason",
-            None
-        )
+        "INVOICE_V2 FINISH:",
+        response.choices[0].finish_reason
     )
 
     print(
-        "Invoice response content:",
+        "INVOICE_V2 CONTENT:",
         repr(data)
     )
 
     if not data:
 
         print(
-            "Invoice full response:",
+            "INVOICE_V2 RAW RESPONSE:",
             response.model_dump()
         )
 
         raise ValueError(
-            "Invoice AI returned an empty response. "
-            "Check Render logs for the full model response."
+            "INVOICE_V2: AI returned empty content"
         )
 
-    json_text = extract_json_text(
+    json_text = extract_json(
         data
     )
 
     if json_text is None:
 
         print(
-            "Invoice non-JSON response:",
+            "INVOICE_V2 INVALID CONTENT:",
             repr(data)
         )
 
         raise ValueError(
-            "Invoice AI returned invalid JSON."
+            "INVOICE_V2: AI response was not valid JSON"
         )
 
     transaction = Transaction.model_validate_json(
         json_text
     )
 
-    transaction.supplier_name = clean_supplier_name(
-        transaction.supplier_name
+    transaction.supplier_name = (
+        clean_supplier_name(
+            transaction.supplier_name
+        )
     )
 
-    if transaction.transaction_date is not None:
+    if transaction.transaction_date:
 
         if not has_valid_date(
             transaction.transaction_date
