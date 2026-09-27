@@ -5,7 +5,7 @@ from invoice_extractor import extract_invoice
 from api_client import send_transaction
 
 
-def process_transaction(text: str):
+def process_transaction(text: str, token: str):
     transaction = extract_transaction(text)
 
     # If the user did not mention a date,
@@ -29,7 +29,7 @@ def process_transaction(text: str):
             "transaction": transaction.model_dump(mode="json")
         }
 
-    result = send_transaction(transaction)
+    result = send_transaction(transaction, token)
 
     # Supplier does not exist
     if result.get("status") == "SUPPLIER_NOT_FOUND":
@@ -47,7 +47,7 @@ def process_transaction(text: str):
     }
 
 
-def process_invoice(image_path: str):
+def process_invoice(image_path: str, token: str):
     transaction = extract_invoice(image_path)
 
     missing_fields = []
@@ -69,7 +69,7 @@ def process_invoice(image_path: str):
             "transaction": transaction.model_dump(mode="json")
         }
 
-    result = send_transaction(transaction)
+    result = send_transaction(transaction, token)
 
     # Supplier does not exist
     if result.get("status") == "SUPPLIER_NOT_FOUND":

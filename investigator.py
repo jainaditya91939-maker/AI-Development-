@@ -20,9 +20,9 @@ client = OpenAI(
 )
 
 
-def get_investigator_data():
+def get_investigator_data(token: str):
 
-    summary = get_supplier_summary()
+    summary = get_supplier_summary(token)
 
     complete_data = []
 
@@ -30,7 +30,7 @@ def get_investigator_data():
 
         supplier_id = supplier["id"]
 
-        ledger = get_supplier_ledger(supplier_id)
+        ledger = get_supplier_ledger(supplier_id, token)
 
         complete_data.append({
             "supplier": supplier,
@@ -40,9 +40,9 @@ def get_investigator_data():
     return complete_data
 
 
-def investigate_business():
+def investigate_business(token: str):
 
-    data = get_investigator_data()
+    data = get_investigator_data(token)
 
     prompt = f"""
 You are an AI Business Investigator for a small Indian business.

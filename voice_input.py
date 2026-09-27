@@ -37,7 +37,7 @@ def speech_to_text():
         return None
 
 
-def process_voice_transaction():
+def process_voice_transaction(token: str):
     text = speech_to_text()
 
     if text is None:
@@ -46,4 +46,4 @@ def process_voice_transaction():
             "message": "Could not understand speech"
         }
 
-    return process_transaction(text)
+    return process_transaction(text, token)

@@ -428,14 +428,15 @@ ANOMALY REPORT:
 # ============================================================
 
 def generate_final_intelligence(
-    question=None
+    question=None,
+    token: str | None = None
 ):
 
     # --------------------------------------------------------
     # Get backend data ONCE
     # --------------------------------------------------------
 
-    backend_data = get_investigator_data()
+    backend_data = get_investigator_data(token)
 
     # ========================================================
     # QUESTION MODE
@@ -482,7 +483,7 @@ def generate_final_intelligence(
 
             try:
 
-                anomalies = detect_anomalies()
+                anomalies = detect_anomalies(token)
 
             except Exception as error:
 
@@ -587,7 +588,7 @@ Give a concise answer to the user's question.
 
         try:
 
-            investigation = investigate_business()
+            investigation = investigate_business(token)
 
         except Exception as error:
 
@@ -602,7 +603,7 @@ Give a concise answer to the user's question.
 
         try:
 
-            anomalies = detect_anomalies()
+            anomalies = detect_anomalies(token)
 
         except Exception as error:
 
@@ -635,7 +636,7 @@ Give a concise answer to the user's question.
 
     try:
 
-        investigation = investigate_business()
+        investigation = investigate_business(token)
 
     except Exception as error:
 
@@ -650,7 +651,7 @@ Give a concise answer to the user's question.
 
     try:
 
-        anomalies = detect_anomalies()
+        anomalies = detect_anomalies(token)
 
     except Exception as error:
 

@@ -266,13 +266,13 @@ def build_anomaly_evidence(data):
 # ANOMALY DETECTION
 # ============================================================
 
-def detect_anomalies():
+def detect_anomalies(token: str):
 
     # --------------------------------------------------------
     # Get backend data
     # --------------------------------------------------------
 
-    data = get_investigator_data()
+    data = get_investigator_data(token)
 
     # --------------------------------------------------------
     # Build structured evidence

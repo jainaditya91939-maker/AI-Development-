@@ -11,28 +11,40 @@ BACKEND_URL = os.getenv(
 
 
 # ==========================================
-# BASIC API FUNCTIONS
+# AUTHENTICATED API FUNCTIONS
 # ==========================================
 
-def get_suppliers():
+def _headers(token: str):
+    if not token:
+        raise ValueError("Authentication token is required")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def get_suppliers(token: str):
     response = requests.get(
-        f"{BACKEND_URL}/api/v1/suppliers"
+        f"{BACKEND_URL}/api/v1/suppliers",
+        headers=_headers(token),
+        timeout=20
     )
     response.raise_for_status()
     return response.json()
 
 
-def get_supplier_summary():
+def get_supplier_summary(token: str):
     response = requests.get(
-        f"{BACKEND_URL}/api/v1/suppliers/summary"
+        f"{BACKEND_URL}/api/v1/suppliers/summary",
+        headers=_headers(token),
+        timeout=20
     )
     response.raise_for_status()
     return response.json()
 
 
-def get_supplier_ledger(supplier_id):
+def get_supplier_ledger(supplier_id: int, token: str):
     response = requests.get(
-        f"{BACKEND_URL}/api/v1/suppliers/{supplier_id}/ledger"
+        f"{BACKEND_URL}/api/v1/suppliers/{supplier_id}/ledger",
+        headers=_headers(token),
+        timeout=20
     )
     response.raise_for_status()
     return response.json()
@@ -274,9 +286,9 @@ def find_supplier(supplier_name: str, suppliers):
 # SEND TRANSACTION
 # ==========================================
 
-def send_transaction(transaction):
+def send_transaction(transaction, token: str):
 
-    suppliers = get_suppliers()
+    suppliers = get_suppliers(token)
 
     supplier = find_supplier(
         transaction.supplier_name,
@@ -319,7 +331,9 @@ def send_transaction(transaction):
 
     response = requests.post(
         f"{BACKEND_URL}/api/v1/transactions",
-        json=data
+        json=data,
+        headers=_headers(token),
+        timeout=20
     )
 
     # ------------------------------------------
