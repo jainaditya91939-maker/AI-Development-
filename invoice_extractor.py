@@ -28,8 +28,11 @@ client = OpenAI(
 )
 
 
-# Verified free vision model on OpenRouter
-MODEL = "google/gemma-3-12b-it:free"
+# ============================================================
+# MODEL
+# ============================================================
+
+MODEL = "google/gemma-4-31b-it:free"
 
 
 # ============================================================
@@ -140,7 +143,7 @@ def extract_json(text):
     except json.JSONDecodeError:
         pass
 
-    # Find JSON object inside extra text
+    # JSON object inside extra text
     match = re.search(
         r"\{.*\}",
         text,
@@ -167,6 +170,7 @@ def extract_json(text):
 # ============================================================
 
 def normalize_transaction_data(data):
+
     if not isinstance(data, dict):
         raise ValueError(
             "Invoice AI did not return a JSON object"
@@ -175,11 +179,8 @@ def normalize_transaction_data(data):
     # --------------------------------------------------------
     # Transaction type
     # --------------------------------------------------------
-    #
+
     # Invoice extraction is always treated as PURCHASE.
-    # This prevents the AI from returning null/invalid
-    # transaction_type.
-    #
     data["transaction_type"] = "PURCHASE"
 
     # --------------------------------------------------------
@@ -197,8 +198,11 @@ def normalize_transaction_data(data):
     amount = data.get("amount")
 
     if amount is not None:
+
         try:
+
             if isinstance(amount, str):
+
                 amount = (
                     amount
                     .replace("₹", "")
@@ -213,6 +217,7 @@ def normalize_transaction_data(data):
                 amount = None
 
         except (ValueError, TypeError):
+
             amount = None
 
     data["amount"] = amount
@@ -226,6 +231,7 @@ def normalize_transaction_data(data):
     )
 
     if transaction_date:
+
         transaction_date = str(
             transaction_date
         ).strip()
@@ -246,6 +252,7 @@ def normalize_transaction_data(data):
     )
 
     if reference_number is not None:
+
         reference_number = str(
             reference_number
         ).strip()
@@ -264,6 +271,7 @@ def normalize_transaction_data(data):
     )
 
     if payment_status is not None:
+
         payment_status = str(
             payment_status
         ).strip()
@@ -280,6 +288,7 @@ def normalize_transaction_data(data):
     notes = data.get("notes")
 
     if notes is not None:
+
         notes = str(notes).strip()
 
         if not notes:
@@ -296,17 +305,45 @@ def normalize_transaction_data(data):
 
 def extract_invoice(image_path: str) -> Transaction:
 
-    print("========================================")
-    print("INVOICE EXTRACTION STARTED")
-    print("MODEL:", MODEL)
-    print("IMAGE:", image_path)
-    print("========================================")
+    print(
+        "========================================",
+        flush=True,
+    )
+
+    print(
+        "INVOICE EXTRACTION STARTED",
+        flush=True,
+    )
+
+    print(
+        "MODEL:",
+        MODEL,
+        flush=True,
+    )
+
+    print(
+        "IMAGE:",
+        image_path,
+        flush=True,
+    )
+
+    print(
+        "OPENROUTER_API_KEY PRESENT:",
+        bool(api_key),
+        flush=True,
+    )
+
+    print(
+        "========================================",
+        flush=True,
+    )
 
     # --------------------------------------------------------
     # Read image
     # --------------------------------------------------------
 
     try:
+
         with open(
             image_path,
             "rb",
@@ -317,9 +354,11 @@ def extract_invoice(image_path: str) -> Transaction:
             ).decode("utf-8")
 
     except Exception as e:
+
         print(
             "INVOICE IMAGE READ ERROR:",
             repr(e),
+            flush=True,
         )
 
         raise ValueError(
@@ -333,6 +372,7 @@ def extract_invoice(image_path: str) -> Transaction:
     print(
         "INVOICE MIME TYPE:",
         mime_type,
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -486,21 +526,30 @@ Example:
     except Exception as e:
 
         print(
-            "========================================"
+            "========================================",
+            flush=True,
         )
+
         print(
-            "OPENROUTER INVOICE ERROR"
+            "OPENROUTER INVOICE ERROR",
+            flush=True,
         )
+
         print(
             "ERROR TYPE:",
             type(e).__name__,
+            flush=True,
         )
+
         print(
             "ERROR:",
             repr(e),
+            flush=True,
         )
+
         print(
-            "========================================"
+            "========================================",
+            flush=True,
         )
 
         raise ValueError(
@@ -512,6 +561,7 @@ Example:
     # --------------------------------------------------------
 
     if not response.choices:
+
         raise ValueError(
             "Invoice AI returned no choices"
         )
@@ -521,11 +571,13 @@ Example:
     print(
         "INVOICE MODEL:",
         MODEL,
+        flush=True,
     )
 
     print(
         "INVOICE FINISH:",
         choice.finish_reason,
+        flush=True,
     )
 
     data = choice.message.content
@@ -533,9 +585,11 @@ Example:
     print(
         "INVOICE RAW CONTENT:",
         repr(data),
+        flush=True,
     )
 
     if not data:
+
         raise ValueError(
             "Invoice AI returned empty content"
         )
@@ -547,6 +601,7 @@ Example:
     raw_data = extract_json(data)
 
     if raw_data is None:
+
         raise ValueError(
             "Invoice AI returned invalid JSON"
         )
@@ -554,6 +609,7 @@ Example:
     print(
         "INVOICE PARSED JSON:",
         raw_data,
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -567,6 +623,7 @@ Example:
     print(
         "INVOICE NORMALIZED DATA:",
         raw_data,
+        flush=True,
     )
 
     # --------------------------------------------------------
@@ -584,6 +641,7 @@ Example:
         print(
             "INVOICE SCHEMA VALIDATION ERROR:",
             repr(e),
+            flush=True,
         )
 
         raise ValueError(
@@ -595,29 +653,38 @@ Example:
     # --------------------------------------------------------
 
     if transaction.amount is not None:
+
         if transaction.amount <= 0:
             transaction.amount = None
 
     if transaction.transaction_date:
+
         if not has_valid_date(
             transaction.transaction_date
         ):
             transaction.transaction_date = None
 
     print(
-        "========================================"
+        "========================================",
+        flush=True,
     )
+
     print(
-        "INVOICE EXTRACTION SUCCESS"
+        "INVOICE EXTRACTION SUCCESS",
+        flush=True,
     )
+
     print(
         "TRANSACTION:",
         transaction.model_dump(
             mode="json"
         ),
+        flush=True,
     )
+
     print(
-        "========================================"
+        "========================================",
+        flush=True,
     )
 
     return transaction
