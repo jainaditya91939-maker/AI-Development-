@@ -11,16 +11,30 @@ from schemas import Transaction
 
 load_dotenv()
 
+
+# ============================================================
+# OPENROUTER CONFIG
+# ============================================================
+
 api_key = os.getenv("OPENROUTER_API_KEY")
+
+if not api_key:
+    raise ValueError("OPENROUTER_API_KEY is not configured")
+
 
 client = OpenAI(
     api_key=api_key,
-    base_url="https://openrouter.ai/api/v1"
+    base_url="https://openrouter.ai/api/v1",
 )
 
 
-MODEL = "inclusionai/ling-3.0-flash-vl:free"
+# Verified free vision model on OpenRouter
+MODEL = "google/gemma-3-12b-it:free"
 
+
+# ============================================================
+# SUPPLIER CLEANING
+# ============================================================
 
 def clean_supplier_name(name):
     if name is None:
@@ -42,7 +56,7 @@ def clean_supplier_name(name):
         "enter company",
         "enter supplier name",
         "company",
-        "supplier"
+        "supplier",
     }
 
     if cleaned in placeholder_names:
@@ -51,6 +65,10 @@ def clean_supplier_name(name):
     return name.strip()
 
 
+# ============================================================
+# DATE VALIDATION
+# ============================================================
+
 def has_valid_date(value):
     if not value:
         return False
@@ -58,25 +76,31 @@ def has_valid_date(value):
     return bool(
         re.match(
             r"^\d{4}-\d{2}-\d{2}$",
-            str(value)
+            str(value),
         )
     )
 
 
-def get_mime_type(image_path):
-    mime_type, _ = mimetypes.guess_type(
-        image_path
-    )
+# ============================================================
+# MIME TYPE
+# ============================================================
 
-    if mime_type in [
+def get_mime_type(image_path):
+    mime_type, _ = mimetypes.guess_type(image_path)
+
+    if mime_type in {
         "image/jpeg",
         "image/png",
-        "image/webp"
-    ]:
+        "image/webp",
+    }:
         return mime_type
 
     return "image/png"
 
+
+# ============================================================
+# JSON EXTRACTION
+# ============================================================
 
 def extract_json(text):
     if not text:
@@ -84,73 +108,245 @@ def extract_json(text):
 
     text = text.strip()
 
+    # Remove markdown code fences
     text = re.sub(
         r"^```json\s*",
         "",
         text,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
     text = re.sub(
         r"^```\s*",
         "",
-        text
+        text,
     )
 
     text = re.sub(
         r"\s*```$",
         "",
-        text
+        text,
     )
 
     text = text.strip()
 
+    # Direct JSON
     try:
-        json.loads(text)
-        return text
+        parsed = json.loads(text)
+
+        if isinstance(parsed, dict):
+            return parsed
+
     except json.JSONDecodeError:
         pass
 
+    # Find JSON object inside extra text
     match = re.search(
         r"\{.*\}",
         text,
-        re.DOTALL
+        re.DOTALL,
     )
 
     if match:
         candidate = match.group(0)
 
         try:
-            json.loads(candidate)
-            return candidate
+            parsed = json.loads(candidate)
+
+            if isinstance(parsed, dict):
+                return parsed
+
         except json.JSONDecodeError:
             pass
 
     return None
 
 
+# ============================================================
+# NORMALIZE TRANSACTION DATA
+# ============================================================
+
+def normalize_transaction_data(data):
+    if not isinstance(data, dict):
+        raise ValueError(
+            "Invoice AI did not return a JSON object"
+        )
+
+    # --------------------------------------------------------
+    # Transaction type
+    # --------------------------------------------------------
+    #
+    # Invoice extraction is always treated as PURCHASE.
+    # This prevents the AI from returning null/invalid
+    # transaction_type.
+    #
+    data["transaction_type"] = "PURCHASE"
+
+    # --------------------------------------------------------
+    # Supplier
+    # --------------------------------------------------------
+
+    data["supplier_name"] = clean_supplier_name(
+        data.get("supplier_name")
+    )
+
+    # --------------------------------------------------------
+    # Amount
+    # --------------------------------------------------------
+
+    amount = data.get("amount")
+
+    if amount is not None:
+        try:
+            if isinstance(amount, str):
+                amount = (
+                    amount
+                    .replace("₹", "")
+                    .replace(",", "")
+                    .replace("INR", "")
+                    .strip()
+                )
+
+            amount = float(amount)
+
+            if amount <= 0:
+                amount = None
+
+        except (ValueError, TypeError):
+            amount = None
+
+    data["amount"] = amount
+
+    # --------------------------------------------------------
+    # Date
+    # --------------------------------------------------------
+
+    transaction_date = data.get(
+        "transaction_date"
+    )
+
+    if transaction_date:
+        transaction_date = str(
+            transaction_date
+        ).strip()
+
+        if not has_valid_date(
+            transaction_date
+        ):
+            transaction_date = None
+
+    data["transaction_date"] = transaction_date
+
+    # --------------------------------------------------------
+    # Reference number
+    # --------------------------------------------------------
+
+    reference_number = data.get(
+        "reference_number"
+    )
+
+    if reference_number is not None:
+        reference_number = str(
+            reference_number
+        ).strip()
+
+        if not reference_number:
+            reference_number = None
+
+    data["reference_number"] = reference_number
+
+    # --------------------------------------------------------
+    # Payment status
+    # --------------------------------------------------------
+
+    payment_status = data.get(
+        "payment_status"
+    )
+
+    if payment_status is not None:
+        payment_status = str(
+            payment_status
+        ).strip()
+
+        if not payment_status:
+            payment_status = None
+
+    data["payment_status"] = payment_status
+
+    # --------------------------------------------------------
+    # Notes
+    # --------------------------------------------------------
+
+    notes = data.get("notes")
+
+    if notes is not None:
+        notes = str(notes).strip()
+
+        if not notes:
+            notes = None
+
+    data["notes"] = notes
+
+    return data
+
+
+# ============================================================
+# MAIN INVOICE EXTRACTION
+# ============================================================
+
 def extract_invoice(image_path: str) -> Transaction:
 
-    with open(
-        image_path,
-        "rb"
-    ) as image_file:
+    print("========================================")
+    print("INVOICE EXTRACTION STARTED")
+    print("MODEL:", MODEL)
+    print("IMAGE:", image_path)
+    print("========================================")
 
-        image_data = base64.b64encode(
-            image_file.read()
-        ).decode("utf-8")
+    # --------------------------------------------------------
+    # Read image
+    # --------------------------------------------------------
+
+    try:
+        with open(
+            image_path,
+            "rb",
+        ) as image_file:
+
+            image_data = base64.b64encode(
+                image_file.read()
+            ).decode("utf-8")
+
+    except Exception as e:
+        print(
+            "INVOICE IMAGE READ ERROR:",
+            repr(e),
+        )
+
+        raise ValueError(
+            f"Could not read invoice image: {e}"
+        )
 
     mime_type = get_mime_type(
         image_path
     )
 
+    print(
+        "INVOICE MIME TYPE:",
+        mime_type,
+    )
+
+    # --------------------------------------------------------
+    # Prompt
+    # --------------------------------------------------------
+
     prompt = """
 Read this invoice image carefully.
 
 Return ONLY valid JSON.
+
 Do not write anything before or after the JSON.
 
-Required format:
+Use exactly this format:
 
 {
   "transaction_type": "PURCHASE",
@@ -162,75 +358,158 @@ Required format:
   "notes": null
 }
 
-Extraction rules:
+EXTRACTION RULES:
 
-supplier_name:
+1. supplier_name
+
 Use the seller/company that issued the invoice.
+
 Do NOT use the buyer/customer.
 
-amount:
+If the seller/company cannot be identified, use null.
+
+2. amount
+
 Use the final GRAND TOTAL or TOTAL PAYABLE.
-Do NOT use subtotal or tax-only amount.
 
-transaction_date:
+Do NOT use subtotal.
+
+Do NOT use tax-only amount.
+
+Do NOT use an individual product amount.
+
+Return only the numeric amount.
+
+For example:
+
+25706
+
+not:
+
+"₹25,706"
+
+3. transaction_date
+
 Use the invoice date.
-Convert it to YYYY-MM-DD.
 
-reference_number:
+Convert it to:
+
+YYYY-MM-DD
+
+If the date cannot be identified, use null.
+
+4. reference_number
+
 Use the invoice number.
-Do NOT use IRN, Ack number or e-way bill number.
 
-transaction_type:
-Use PURCHASE for a normal sales invoice.
+Do NOT use:
 
-payment_status:
-Use only if explicitly written.
-Otherwise null.
+- IRN
+- Ack number
+- Acknowledgement number
+- E-way bill number
 
-notes:
+5. transaction_type
+
+For a normal purchase/sales invoice, ALWAYS return:
+
+"PURCHASE"
+
+6. payment_status
+
+Only use this if the invoice explicitly states something such as:
+
+PAID
+UNPAID
+PENDING
+PARTIALLY PAID
+
+Otherwise return null.
+
+7. notes
+
 Use null unless useful information is clearly visible.
 
-Never invent information.
+8. Never invent information.
+
 If something cannot be read, use null.
+
+IMPORTANT:
+
+Return ONLY JSON.
 
 Example:
 
 {
   "transaction_type": "PURCHASE",
-  "supplier_name": "Sharma Electricals",
-  "amount": 35931,
+  "supplier_name": "Havells India Ltd",
+  "amount": 25706,
   "payment_status": null,
-  "transaction_date": "2025-09-12",
-  "reference_number": "SE/25-26/0147",
+  "transaction_date": "2026-09-28",
+  "reference_number": "INV-001",
   "notes": null
 }
 """
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        max_tokens=500,
-        temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": (
-                                f"data:{mime_type};base64,"
-                                f"{image_data}"
-                            )
-                        }
-                    }
-                ]
-            }
-        ]
-    )
+    # --------------------------------------------------------
+    # OpenRouter request
+    # --------------------------------------------------------
+
+    try:
+
+        response = client.chat.completions.create(
+            model=MODEL,
+            max_tokens=700,
+            temperature=0,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": (
+                                    f"data:{mime_type};"
+                                    f"base64,{image_data}"
+                                )
+                            },
+                        },
+                    ],
+                }
+            ],
+        )
+
+    except Exception as e:
+
+        print(
+            "========================================"
+        )
+        print(
+            "OPENROUTER INVOICE ERROR"
+        )
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+        )
+        print(
+            "ERROR:",
+            repr(e),
+        )
+        print(
+            "========================================"
+        )
+
+        raise ValueError(
+            f"Invoice AI request failed: {e}"
+        )
+
+    # --------------------------------------------------------
+    # Validate response
+    # --------------------------------------------------------
 
     if not response.choices:
         raise ValueError(
@@ -239,21 +518,21 @@ Example:
 
     choice = response.choices[0]
 
-    data = choice.message.content
-
     print(
         "INVOICE MODEL:",
-        MODEL
+        MODEL,
     )
 
     print(
         "INVOICE FINISH:",
-        choice.finish_reason
+        choice.finish_reason,
     )
 
+    data = choice.message.content
+
     print(
-        "INVOICE CONTENT:",
-        repr(data)
+        "INVOICE RAW CONTENT:",
+        repr(data),
     )
 
     if not data:
@@ -261,37 +540,84 @@ Example:
             "Invoice AI returned empty content"
         )
 
-    json_text = extract_json(
-        data
-    )
+    # --------------------------------------------------------
+    # Parse JSON
+    # --------------------------------------------------------
 
-    if json_text is None:
+    raw_data = extract_json(data)
+
+    if raw_data is None:
         raise ValueError(
             "Invoice AI returned invalid JSON"
         )
 
-    transaction = (
-        Transaction.model_validate_json(
-            json_text
-        )
+    print(
+        "INVOICE PARSED JSON:",
+        raw_data,
     )
 
-    transaction.supplier_name = (
-        clean_supplier_name(
-            transaction.supplier_name
-        )
+    # --------------------------------------------------------
+    # Normalize
+    # --------------------------------------------------------
+
+    raw_data = normalize_transaction_data(
+        raw_data
     )
+
+    print(
+        "INVOICE NORMALIZED DATA:",
+        raw_data,
+    )
+
+    # --------------------------------------------------------
+    # Pydantic validation
+    # --------------------------------------------------------
+
+    try:
+
+        transaction = Transaction.model_validate(
+            raw_data
+        )
+
+    except Exception as e:
+
+        print(
+            "INVOICE SCHEMA VALIDATION ERROR:",
+            repr(e),
+        )
+
+        raise ValueError(
+            f"Invoice data validation failed: {e}"
+        )
+
+    # --------------------------------------------------------
+    # Final validation
+    # --------------------------------------------------------
+
+    if transaction.amount is not None:
+        if transaction.amount <= 0:
+            transaction.amount = None
 
     if transaction.transaction_date:
-
         if not has_valid_date(
             transaction.transaction_date
         ):
             transaction.transaction_date = None
 
-    if transaction.amount is not None:
-
-        if transaction.amount <= 0:
-            transaction.amount = None
+    print(
+        "========================================"
+    )
+    print(
+        "INVOICE EXTRACTION SUCCESS"
+    )
+    print(
+        "TRANSACTION:",
+        transaction.model_dump(
+            mode="json"
+        ),
+    )
+    print(
+        "========================================"
+    )
 
     return transaction
