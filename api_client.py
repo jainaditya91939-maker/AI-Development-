@@ -79,43 +79,100 @@ def normalize_supplier_name(name: str) -> str:
 
     hindi_aliases = {
 
-        # Havells
+        # ====================================================
+        # HAVELLS
+        # ====================================================
+
         "हैवेल्स": "havells",
         "हैवेल": "havells",
+        "हैवल्स": "havells",
+        "हैवल": "havells",
+        "हैवेलस": "havells",
+        "हैवेल्स": "havells",
+        "हैवन्स": "havells",
+        "हैवंत": "havells",
+        "हैवन्स": "havells",
+        "हैवेल्स": "havells",
 
-        # Polycab
+        # ====================================================
+        # POLYCAB
+        # ====================================================
+
         "पॉलीकैब": "polycab",
         "पॉली कैब": "polycab",
+        "पोलिकैब": "polycab",
+        "पोलीकैब": "polycab",
+        "पोली कैब": "polycab",
 
-        # Anchor
+        # ====================================================
+        # ANCHOR
+        # ====================================================
+
+        "एंकर": "anchor",
         "एंकर": "anchor",
 
-        # Finolex
+        # ====================================================
+        # FINOLEX
+        # ====================================================
+
+        "फिनोलेक्स": "finolex",
         "फिनोलेक्स": "finolex",
 
-        # RR Kabel
+        # ====================================================
+        # RR KABEL
+        # ====================================================
+
         "आरआर": "rr",
+        "आर आर": "rr",
+        "आरआरकेबल": "rr kabel",
+        "आरआर केबल": "rr kabel",
+        "आर आर केबल": "rr kabel",
         "केबल": "cable",
 
-        # Schneider
+        # ====================================================
+        # SCHNEIDER
+        # ====================================================
+
         "श्नाइडर": "schneider",
+        "स्नाइडर": "schneider",
 
-        # Philips
+        # ====================================================
+        # PHILIPS
+        # ====================================================
+
         "फिलिप्स": "philips",
+        "फिलिप": "philips",
 
-        # Crompton
+        # ====================================================
+        # CROMPTON
+        # ====================================================
+
         "क्रॉम्पटन": "crompton",
+        "क्रॉम्प्टन": "crompton",
 
-        # Legrand
+        # ====================================================
+        # LEGRAND
+        # ====================================================
+
         "लेग्रैंड": "legrand",
+        "लेग्रां": "legrand",
 
-        # Wipro
+        # ====================================================
+        # WIPRO
+        # ====================================================
+
         "विप्रो": "wipro",
 
-        # Bajaj
+        # ====================================================
+        # BAJAJ
+        # ====================================================
+
         "बजाज": "bajaj",
 
-        # Common words
+        # ====================================================
+        # COMMON ELECTRICAL WORDS
+        # ====================================================
+
         "इलेक्ट्रिकल": "electrical",
         "इलेक्ट्रिकल्स": "electricals",
         "इलेक्ट्रिक": "electric",
@@ -125,6 +182,7 @@ def normalize_supplier_name(name: str) -> str:
         "एसी": "ac",
     }
 
+    # Apply Hindi aliases
     for hindi_word, english_word in hindi_aliases.items():
         value = value.replace(
             hindi_word,
@@ -133,8 +191,6 @@ def normalize_supplier_name(name: str) -> str:
 
     # --------------------------------------------------------
     # Common company suffixes
-    #
-    # These should not decide supplier identity.
     # --------------------------------------------------------
 
     value = re.sub(
@@ -196,10 +252,7 @@ def supplier_similarity(
     if not a or not b:
         return 0.0
 
-    # --------------------------------------------------------
     # Exact normalized match
-    # --------------------------------------------------------
-
     if a == b:
         return 1.0
 
@@ -210,7 +263,7 @@ def supplier_similarity(
         return 0.0
 
     # --------------------------------------------------------
-    # Exact token overlap
+    # Token overlap
     # --------------------------------------------------------
 
     common_tokens = a_tokens.intersection(
@@ -228,15 +281,6 @@ def supplier_similarity(
             len(common_tokens) /
             smaller_count
         )
-
-        # If all words of the shorter supplier name
-        # are contained in the longer name.
-        #
-        # Example:
-        # Havells
-        # Havells India
-        #
-        # -> 1.0
 
         if containment_score == 1.0:
             return 0.96
@@ -368,16 +412,6 @@ def find_supplier(
 
     # --------------------------------------------------------
     # 3. Token containment
-    #
-    # Example:
-    #
-    # AI:
-    # Havells India Ltd.
-    #
-    # DB:
-    # Havells
-    #
-    # This should match.
     # --------------------------------------------------------
 
     requested_tokens = supplier_tokens(
@@ -423,8 +457,8 @@ def find_supplier(
                 supplier
             )
 
-    # Only automatically use containment
-    # when there is exactly one clear match.
+    # Only use containment when there is
+    # exactly one clear supplier.
     if len(containment_matches) == 1:
         return containment_matches[0]
 
@@ -472,8 +506,6 @@ def find_supplier(
 
         second_score = matches[1][0]
 
-        # If two suppliers are almost equally similar,
-        # don't guess.
         if (
             best_score < 0.90
             and
