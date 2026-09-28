@@ -10,14 +10,17 @@ BACKEND_URL = os.getenv(
 )
 
 
-# ==========================================
-# AUTHENTICATED API FUNCTIONS
-# ==========================================
+# ============================================================
+# AUTHENTICATED API
+# ============================================================
 
 def _headers(token: str):
     if not token:
         raise ValueError("Authentication token is required")
-    return {"Authorization": f"Bearer {token}"}
+
+    return {
+        "Authorization": f"Bearer {token}"
+    }
 
 
 def get_suppliers(token: str):
@@ -26,7 +29,9 @@ def get_suppliers(token: str):
         headers=_headers(token),
         timeout=20
     )
+
     response.raise_for_status()
+
     return response.json()
 
 
@@ -36,42 +41,81 @@ def get_supplier_summary(token: str):
         headers=_headers(token),
         timeout=20
     )
+
     response.raise_for_status()
+
     return response.json()
 
 
-def get_supplier_ledger(supplier_id: int, token: str):
+def get_supplier_ledger(
+    supplier_id: int,
+    token: str
+):
     response = requests.get(
         f"{BACKEND_URL}/api/v1/suppliers/{supplier_id}/ledger",
         headers=_headers(token),
         timeout=20
     )
+
     response.raise_for_status()
+
     return response.json()
 
 
-# ==========================================
+# ============================================================
 # SUPPLIER NAME NORMALIZATION
-# ==========================================
+# ============================================================
 
 def normalize_supplier_name(name: str) -> str:
-    """
-    Normalize supplier names so that small
-    English/Hindi/Hinglish variations can match.
-    """
 
     if not name:
         return ""
 
-    value = name.lower().strip()
+    value = str(name).lower().strip()
 
-    # ------------------------------------------
-    # Common Hindi speech-recognition patterns
-    # ------------------------------------------
+    # --------------------------------------------------------
+    # Common Hindi speech-recognition aliases
+    # --------------------------------------------------------
 
     hindi_aliases = {
-        "एबीसी": "abc",
-        "ए बी सी": "abc",
+
+        # Havells
+        "हैवेल्स": "havells",
+        "हैवेल": "havells",
+
+        # Polycab
+        "पॉलीकैब": "polycab",
+        "पॉली कैब": "polycab",
+
+        # Anchor
+        "एंकर": "anchor",
+
+        # Finolex
+        "फिनोलेक्स": "finolex",
+
+        # RR Kabel
+        "आरआर": "rr",
+        "केबल": "cable",
+
+        # Schneider
+        "श्नाइडर": "schneider",
+
+        # Philips
+        "फिलिप्स": "philips",
+
+        # Crompton
+        "क्रॉम्पटन": "crompton",
+
+        # Legrand
+        "लेग्रैंड": "legrand",
+
+        # Wipro
+        "विप्रो": "wipro",
+
+        # Bajaj
+        "बजाज": "bajaj",
+
+        # Common words
         "इलेक्ट्रिकल": "electrical",
         "इलेक्ट्रिकल्स": "electricals",
         "इलेक्ट्रिक": "electric",
@@ -87,9 +131,22 @@ def normalize_supplier_name(name: str) -> str:
             english_word
         )
 
-    # ------------------------------------------
+    # --------------------------------------------------------
+    # Common company suffixes
+    #
+    # These should not decide supplier identity.
+    # --------------------------------------------------------
+
+    value = re.sub(
+        r"\b(private limited|pvt ltd|pvt\. ltd\.|"
+        r"private ltd|limited|ltd|llp|incorporated|inc)\b",
+        " ",
+        value
+    )
+
+    # --------------------------------------------------------
     # Remove punctuation
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     value = re.sub(
         r"[^a-z0-9\s]",
@@ -97,9 +154,9 @@ def normalize_supplier_name(name: str) -> str:
         value
     )
 
-    # ------------------------------------------
+    # --------------------------------------------------------
     # Normalize whitespace
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     value = re.sub(
         r"\s+",
@@ -110,17 +167,28 @@ def normalize_supplier_name(name: str) -> str:
     return value
 
 
-# ==========================================
-# REMOVE COMMON PLURAL DIFFERENCES
-# ==========================================
+# ============================================================
+# TOKENIZATION
+# ============================================================
 
-def supplier_similarity(name1: str, name2: str) -> float:
-    """
-    Calculate similarity between two supplier names.
-    Handles small differences such as:
-    Electrical
-    Electricals
-    """
+def supplier_tokens(name: str):
+
+    normalized = normalize_supplier_name(name)
+
+    if not normalized:
+        return set()
+
+    return set(normalized.split())
+
+
+# ============================================================
+# SUPPLIER SIMILARITY
+# ============================================================
+
+def supplier_similarity(
+    name1: str,
+    name2: str
+) -> float:
 
     a = normalize_supplier_name(name1)
     b = normalize_supplier_name(name2)
@@ -128,12 +196,62 @@ def supplier_similarity(name1: str, name2: str) -> float:
     if not a or not b:
         return 0.0
 
+    # --------------------------------------------------------
     # Exact normalized match
+    # --------------------------------------------------------
 
     if a == b:
         return 1.0
 
-    # Direct similarity
+    a_tokens = supplier_tokens(name1)
+    b_tokens = supplier_tokens(name2)
+
+    if not a_tokens or not b_tokens:
+        return 0.0
+
+    # --------------------------------------------------------
+    # Exact token overlap
+    # --------------------------------------------------------
+
+    common_tokens = a_tokens.intersection(
+        b_tokens
+    )
+
+    if common_tokens:
+
+        smaller_count = min(
+            len(a_tokens),
+            len(b_tokens)
+        )
+
+        containment_score = (
+            len(common_tokens) /
+            smaller_count
+        )
+
+        # If all words of the shorter supplier name
+        # are contained in the longer name.
+        #
+        # Example:
+        # Havells
+        # Havells India
+        #
+        # -> 1.0
+
+        if containment_score == 1.0:
+            return 0.96
+
+        token_overlap_score = (
+            2 * len(common_tokens)
+            / (len(a_tokens) + len(b_tokens))
+        )
+
+    else:
+        token_overlap_score = 0.0
+
+    # --------------------------------------------------------
+    # Direct string similarity
+    # --------------------------------------------------------
 
     direct_score = SequenceMatcher(
         None,
@@ -141,12 +259,9 @@ def supplier_similarity(name1: str, name2: str) -> float:
         b
     ).ratio()
 
-    # ------------------------------------------
-    # Token comparison
-    # ------------------------------------------
-
-    a_tokens = a.split()
-    b_tokens = b.split()
+    # --------------------------------------------------------
+    # Token-level similarity
+    # --------------------------------------------------------
 
     token_scores = []
 
@@ -172,38 +287,42 @@ def supplier_similarity(name1: str, name2: str) -> float:
         )
 
     if token_scores:
-        token_score = sum(token_scores) / len(token_scores)
+        token_similarity_score = (
+            sum(token_scores) /
+            len(token_scores)
+        )
     else:
-        token_score = 0.0
+        token_similarity_score = 0.0
 
     return max(
         direct_score,
-        token_score
+        token_overlap_score,
+        token_similarity_score
     )
 
 
-# ==========================================
+# ============================================================
 # FIND SUPPLIER
-# ==========================================
+# ============================================================
 
-def find_supplier(supplier_name: str, suppliers):
-    """
-    Find the best matching supplier.
-
-    Priority:
-    1. Exact name
-    2. Normalized exact name
-    3. High-confidence fuzzy match
-    """
+def find_supplier(
+    supplier_name: str,
+    suppliers
+):
 
     if not supplier_name:
         return None
 
-    requested = supplier_name.strip()
+    requested = str(
+        supplier_name
+    ).strip()
 
-    # ------------------------------------------
+    if not requested:
+        return None
+
+    # --------------------------------------------------------
     # 1. Exact match
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     for supplier in suppliers:
 
@@ -211,15 +330,20 @@ def find_supplier(supplier_name: str, suppliers):
             supplier.get("name", "")
         ).strip()
 
-        if db_name.lower() == requested.lower():
+        if (
+            db_name.lower()
+            == requested.lower()
+        ):
             return supplier
 
-    # ------------------------------------------
+    # --------------------------------------------------------
     # 2. Normalized exact match
-    # ------------------------------------------
+    # --------------------------------------------------------
 
-    requested_normalized = normalize_supplier_name(
-        requested
+    requested_normalized = (
+        normalize_supplier_name(
+            requested
+        )
     )
 
     for supplier in suppliers:
@@ -228,19 +352,85 @@ def find_supplier(supplier_name: str, suppliers):
             supplier.get("name", "")
         )
 
-        db_normalized = normalize_supplier_name(
-            db_name
+        db_normalized = (
+            normalize_supplier_name(
+                db_name
+            )
         )
 
         if (
             requested_normalized
-            and requested_normalized == db_normalized
+            and
+            requested_normalized
+            == db_normalized
         ):
             return supplier
 
-    # ------------------------------------------
-    # 3. Fuzzy matching
-    # ------------------------------------------
+    # --------------------------------------------------------
+    # 3. Token containment
+    #
+    # Example:
+    #
+    # AI:
+    # Havells India Ltd.
+    #
+    # DB:
+    # Havells
+    #
+    # This should match.
+    # --------------------------------------------------------
+
+    requested_tokens = supplier_tokens(
+        requested
+    )
+
+    containment_matches = []
+
+    for supplier in suppliers:
+
+        db_name = str(
+            supplier.get("name", "")
+        )
+
+        db_tokens = supplier_tokens(
+            db_name
+        )
+
+        if not requested_tokens or not db_tokens:
+            continue
+
+        common_tokens = (
+            requested_tokens
+            .intersection(db_tokens)
+        )
+
+        if not common_tokens:
+            continue
+
+        smaller_count = min(
+            len(requested_tokens),
+            len(db_tokens)
+        )
+
+        containment = (
+            len(common_tokens) /
+            smaller_count
+        )
+
+        if containment == 1.0:
+
+            containment_matches.append(
+                supplier
+            )
+
+    # Only automatically use containment
+    # when there is exactly one clear match.
+    if len(containment_matches) == 1:
+        return containment_matches[0]
+
+    # --------------------------------------------------------
+    # 4. Fuzzy matching
+    # --------------------------------------------------------
 
     matches = []
 
@@ -270,11 +460,30 @@ def find_supplier(supplier_name: str, suppliers):
         reverse=True
     )
 
-    best_score, best_supplier = matches[0]
+    best_score, best_supplier = (
+        matches[0]
+    )
 
-    # ------------------------------------------
-    # Safety threshold
-    # ------------------------------------------
+    # --------------------------------------------------------
+    # Ambiguity protection
+    # --------------------------------------------------------
+
+    if len(matches) > 1:
+
+        second_score = matches[1][0]
+
+        # If two suppliers are almost equally similar,
+        # don't guess.
+        if (
+            best_score < 0.90
+            and
+            (best_score - second_score) < 0.08
+        ):
+            return None
+
+    # --------------------------------------------------------
+    # High-confidence fuzzy match
+    # --------------------------------------------------------
 
     if best_score >= 0.78:
         return best_supplier
@@ -282,52 +491,89 @@ def find_supplier(supplier_name: str, suppliers):
     return None
 
 
-# ==========================================
+# ============================================================
 # SEND TRANSACTION
-# ==========================================
+# ============================================================
 
-def send_transaction(transaction, token: str):
+def send_transaction(
+    transaction,
+    token: str
+):
 
-    suppliers = get_suppliers(token)
+    print(
+        "AI TRANSACTION SUPPLIER:",
+        transaction.supplier_name,
+        flush=True
+    )
+
+    suppliers = get_suppliers(
+        token
+    )
+
+    print(
+        "AI SUPPLIERS RECEIVED:",
+        len(suppliers),
+        flush=True
+    )
 
     supplier = find_supplier(
         transaction.supplier_name,
         suppliers
     )
 
-    # ------------------------------------------
+    # --------------------------------------------------------
     # Supplier not found
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     if supplier is None:
+
+        print(
+            "SUPPLIER MATCH FAILED:",
+            transaction.supplier_name,
+            flush=True
+        )
 
         return {
             "status": "SUPPLIER_NOT_FOUND",
             "message": (
-                f"Supplier '{transaction.supplier_name}' "
+                f"Supplier "
+                f"'{transaction.supplier_name}' "
                 "not found in database"
             ),
-            "supplier_name": transaction.supplier_name
+            "supplier_name": (
+                transaction.supplier_name
+            )
         }
 
-    # ------------------------------------------
+    print(
+        "SUPPLIER MATCH SUCCESS:",
+        supplier.get("name"),
+        supplier.get("id"),
+        flush=True
+    )
+
+    # --------------------------------------------------------
     # Transaction data
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     data = {
         "supplier_id": supplier["id"],
-        "transaction_type": transaction.transaction_type,
+        "transaction_type": (
+            transaction.transaction_type
+        ),
         "amount": transaction.amount,
         "transaction_date": (
             transaction.transaction_date.isoformat()
         ),
-        "reference_number": transaction.reference_number,
+        "reference_number": (
+            transaction.reference_number
+        ),
         "notes": transaction.notes
     }
 
-    # ------------------------------------------
+    # --------------------------------------------------------
     # Send to backend
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     response = requests.post(
         f"{BACKEND_URL}/api/v1/transactions",
@@ -336,20 +582,22 @@ def send_transaction(transaction, token: str):
         timeout=20
     )
 
-    # ------------------------------------------
+    # --------------------------------------------------------
     # Duplicate transaction
-    # ------------------------------------------
+    # --------------------------------------------------------
 
     if response.status_code == 409:
 
         return {
             "status": "DUPLICATE_TRANSACTION",
-            "message": "Duplicate transaction detected"
+            "message": (
+                "Duplicate transaction detected"
+            )
         }
 
-    # ------------------------------------------
-    # Other backend errors
-    # ------------------------------------------
+    # --------------------------------------------------------
+    # Backend errors
+    # --------------------------------------------------------
 
     response.raise_for_status()
 
