@@ -4,17 +4,31 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+)
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from final_intelligence import generate_final_intelligence
-from processor import process_transaction, process_invoice
+
+# ============================================================
+# APP
+# ============================================================
+
+app = FastAPI(
+    title="AI Business Investigator AI Service"
+)
 
 
-app = FastAPI(title="AI Business Investigator AI Service")
-
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,8 +43,22 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# AUTH
+# ============================================================
+
 security = HTTPBearer(auto_error=True)
 
+
+def get_token(
+    credentials: HTTPAuthorizationCredentials,
+) -> str:
+    return credentials.credentials
+
+
+# ============================================================
+# REQUEST MODELS
+# ============================================================
 
 class InvestigatorRequest(BaseModel):
     question: str
@@ -40,9 +68,9 @@ class VoiceTransactionRequest(BaseModel):
     text: str
 
 
-def get_token(credentials: HTTPAuthorizationCredentials) -> str:
-    return credentials.credentials
-
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
 @app.get("/")
 def home():
@@ -51,19 +79,60 @@ def home():
     }
 
 
+# ============================================================
+# AI INVESTIGATOR - GET
+# ============================================================
+
 @app.get("/api/v1/ai/investigate")
 def investigate(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    token = get_token(credentials)
+    try:
+        # Lazy import
+        from final_intelligence import (
+            generate_final_intelligence
+        )
 
-    result = generate_final_intelligence(token=token)
+        token = get_token(credentials)
 
-    return {
-        "status": "SUCCESS",
-        "report": result,
-    }
+        result = generate_final_intelligence(
+            token=token
+        )
 
+        return {
+            "status": "SUCCESS",
+            "report": result,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(
+            "========== INVESTIGATE ERROR ==========",
+            flush=True,
+        )
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+            flush=True,
+        )
+        print(
+            "ERROR:",
+            repr(e),
+            flush=True,
+        )
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI investigation failed: {str(e)}",
+        )
+
+
+# ============================================================
+# AI INVESTIGATOR - POST
+# ============================================================
 
 @app.post("/api/v1/ai/investigate")
 def investigate_question(
@@ -76,19 +145,54 @@ def investigate_question(
             detail="Question cannot be empty",
         )
 
-    token = get_token(credentials)
+    try:
+        # Lazy import
+        from final_intelligence import (
+            generate_final_intelligence
+        )
 
-    result = generate_final_intelligence(
-        question=request.question,
-        token=token,
-    )
+        token = get_token(credentials)
 
-    return {
-        "status": "SUCCESS",
-        "question": request.question,
-        "answer": result,
-    }
+        result = generate_final_intelligence(
+            question=request.question,
+            token=token,
+        )
 
+        return {
+            "status": "SUCCESS",
+            "question": request.question,
+            "answer": result,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(
+            "========== INVESTIGATE QUESTION ERROR ==========",
+            flush=True,
+        )
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+            flush=True,
+        )
+        print(
+            "ERROR:",
+            repr(e),
+            flush=True,
+        )
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"AI investigation failed: {str(e)}",
+        )
+
+
+# ============================================================
+# VOICE TRANSACTION
+# ============================================================
 
 @app.post("/api/v1/ai/voice/transaction")
 def voice_transaction(
@@ -101,16 +205,55 @@ def voice_transaction(
             detail="Voice text cannot be empty",
         )
 
-    token = get_token(credentials)
-
     try:
-        return process_transaction(request.text, token)
+        print(
+            "========== VOICE REQUEST ==========",
+            flush=True,
+        )
+
+        # Lazy import
+        from processor import process_transaction
+
+        token = get_token(credentials)
+
+        print(
+            "Voice text:",
+            request.text,
+            flush=True,
+        )
+
+        result = process_transaction(
+            request.text,
+            token,
+        )
+
+        print(
+            "Voice result:",
+            repr(result),
+            flush=True,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
 
     except Exception as e:
-        print("========== VOICE TRANSACTION ERROR ==========")
-        print("ERROR:", repr(e))
+        print(
+            "========== VOICE TRANSACTION ERROR ==========",
+            flush=True,
+        )
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+            flush=True,
+        )
+        print(
+            "ERROR:",
+            repr(e),
+            flush=True,
+        )
         traceback.print_exc()
-        print("=============================================")
 
         raise HTTPException(
             status_code=500,
@@ -118,11 +261,20 @@ def voice_transaction(
         )
 
 
+# ============================================================
+# INVOICE TRANSACTION
+# ============================================================
+
 @app.post("/api/v1/ai/invoice/transaction")
 def invoice_transaction(
     file: UploadFile = File(...),
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
+    print(
+        "🔥🔥🔥 INVOICE ENDPOINT HIT 🔥🔥🔥",
+        flush=True,
+    )
+
     allowed_types = {
         "image/jpeg",
         "image/png",
@@ -151,9 +303,21 @@ def invoice_transaction(
     temp_path = None
 
     try:
-        print("========== INVOICE REQUEST ==========")
-        print("Filename:", file.filename)
-        print("Content-Type:", file.content_type)
+        print(
+            "Invoice filename:",
+            file.filename,
+            flush=True,
+        )
+
+        print(
+            "Invoice content type:",
+            file.content_type,
+            flush=True,
+        )
+
+        # ----------------------------------------------------
+        # Save uploaded file
+        # ----------------------------------------------------
 
         with tempfile.NamedTemporaryFile(
             delete=False,
@@ -167,19 +331,63 @@ def invoice_transaction(
                 temp_file,
             )
 
-        print("Temporary invoice path:", temp_path)
+        print(
+            "Invoice saved:",
+            temp_path,
+            flush=True,
+        )
+
+        # ----------------------------------------------------
+        # Get token
+        # ----------------------------------------------------
 
         token = get_token(credentials)
 
-        print("Starting invoice processing...")
+        print(
+            "Token received.",
+            flush=True,
+        )
+
+        # ----------------------------------------------------
+        # Lazy import
+        # ----------------------------------------------------
+
+        print(
+            "Loading processor...",
+            flush=True,
+        )
+
+        from processor import process_invoice
+
+        print(
+            "Processor loaded.",
+            flush=True,
+        )
+
+        # ----------------------------------------------------
+        # Process invoice
+        # ----------------------------------------------------
+
+        print(
+            "Starting process_invoice...",
+            flush=True,
+        )
 
         result = process_invoice(
             temp_path,
             token,
         )
 
-        print("Invoice processing result:", result)
-        print("========== INVOICE SUCCESS ==========")
+        print(
+            "Invoice result:",
+            repr(result),
+            flush=True,
+        )
+
+        print(
+            "🔥🔥🔥 INVOICE SUCCESS 🔥🔥🔥",
+            flush=True,
+        )
 
         return result
 
@@ -187,11 +395,29 @@ def invoice_transaction(
         raise
 
     except Exception as e:
-        print("========== INVOICE PROCESSING ERROR ==========")
-        print("ERROR TYPE:", type(e).__name__)
-        print("ERROR:", repr(e))
+        print(
+            "🔥🔥🔥 INVOICE PROCESSING ERROR 🔥🔥🔥",
+            flush=True,
+        )
+
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+            flush=True,
+        )
+
+        print(
+            "ERROR:",
+            repr(e),
+            flush=True,
+        )
+
         traceback.print_exc()
-        print("==============================================")
+
+        print(
+            "🔥🔥🔥 END INVOICE ERROR 🔥🔥🔥",
+            flush=True,
+        )
 
         raise HTTPException(
             status_code=500,
@@ -202,9 +428,15 @@ def invoice_transaction(
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                print("Temporary invoice file removed.")
-            except Exception as cleanup_error:
+
                 print(
-                    "Could not remove temporary invoice file:",
-                    repr(cleanup_error),
+                    "Temporary invoice removed.",
+                    flush=True,
+                )
+
+            except Exception as e:
+                print(
+                    "Temporary file cleanup error:",
+                    repr(e),
+                    flush=True,
                 )
