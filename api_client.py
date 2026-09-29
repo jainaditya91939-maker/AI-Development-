@@ -88,11 +88,8 @@ def normalize_supplier_name(name: str) -> str:
         "हैवल्स": "havells",
         "हैवल": "havells",
         "हैवेलस": "havells",
-        "हैवेल्स": "havells",
         "हैवन्स": "havells",
         "हैवंत": "havells",
-        "हैवन्स": "havells",
-        "हैवेल्स": "havells",
 
         # ====================================================
         # POLYCAB
@@ -104,18 +101,24 @@ def normalize_supplier_name(name: str) -> str:
         "पोलीकैब": "polycab",
         "पोली कैब": "polycab",
 
+        # New speech-recognition variants
+        "होलीकैब": "polycab",
+        "होली कैब": "polycab",
+        "होलीकेब": "polycab",
+        "होली केब": "polycab",
+        "पॉली केब": "polycab",
+        "पोलि कैब": "polycab",
+
         # ====================================================
         # ANCHOR
         # ====================================================
 
-        "एंकर": "anchor",
         "एंकर": "anchor",
 
         # ====================================================
         # FINOLEX
         # ====================================================
 
-        "फिनोलेक्स": "finolex",
         "फिनोलेक्स": "finolex",
 
         # ====================================================
@@ -252,7 +255,10 @@ def supplier_similarity(
     if not a or not b:
         return 0.0
 
+    # --------------------------------------------------------
     # Exact normalized match
+    # --------------------------------------------------------
+
     if a == b:
         return 1.0
 
@@ -263,7 +269,7 @@ def supplier_similarity(
         return 0.0
 
     # --------------------------------------------------------
-    # Token overlap
+    # Exact token overlap
     # --------------------------------------------------------
 
     common_tokens = a_tokens.intersection(
