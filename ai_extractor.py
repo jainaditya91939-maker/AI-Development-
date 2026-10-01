@@ -1,6 +1,5 @@
 import os
 import re
-import json
 from datetime import date
 
 from dotenv import load_dotenv
@@ -76,32 +75,90 @@ def has_explicit_date(text: str) -> bool:
 
 def extract_amount(text: str):
 
+    """
+    Generic amount extraction.
+
+    IMPORTANT:
+    This function does NOT depend on supplier/company name.
+
+    It supports:
+        ₹500
+        ₹ 500
+        Rs 500
+        Rs. 500
+        500 rupees
+        500 रुपये
+        500 रुपए
+        500 रुपया
+        500 ka
+        500 का
+        500 की
+        500 के
+
+    It also handles common ASR mistakes such as:
+        आईएस 500
+        आरएस 500
+        आई एस 500
+        आर एस 500
+    """
+
     patterns = [
 
-        # ₹1000 / ₹ 1000 / ₹1,000.50
+        # ----------------------------------------------------
+        # STANDARD CURRENCY SYMBOL
+        # ----------------------------------------------------
+
         r'₹\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
 
-        # Rs 1000 / Rs. 1000
-        r'rs\.?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+        # ----------------------------------------------------
+        # ENGLISH CURRENCY WORDS
+        # ----------------------------------------------------
 
-        # rupees 1000
-        r'rupees?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+        r'\brs\.?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
 
-        # 1000 rupees
-        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?',
+        r'\brupees?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
 
-        # 1000 रुपये
+        # ----------------------------------------------------
+        # HINDI / ASR CURRENCY VARIANTS
+        # ----------------------------------------------------
+
+        r'\bआईएस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
+        r'\bआई\s*एस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
+        r'\bआरएस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
+        r'\bआर\s*एस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
         r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपये',
 
-        # 1000 रुपए
         r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपए',
 
-        # 1000 रुपया
         r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपया',
 
-        # 500 ka / 500 ki / 500 ke / 500 का / 500 की / 500 के
-        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*'
-        r'(?:ka|ki|ke|का|की|के)\b',
+        # ----------------------------------------------------
+        # ENGLISH NUMBER + RUPEES
+        # ----------------------------------------------------
+
+        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?',
+
+        # ----------------------------------------------------
+        # HINDI / HINGLISH SPEECH
+        #
+        # Examples:
+        # 500 ka
+        # 500 ki
+        # 500 ke
+        # 500 का
+        # 500 की
+        # 500 के
+        #
+        # No \b after Hindi characters.
+        # ----------------------------------------------------
+
+        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:ka|ki|ke)(?=\s|$|[.,!?])',
+
+        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:का|की|के)(?=\s|$|[.,!?])',
     ]
 
     for pattern in patterns:
@@ -112,19 +169,23 @@ def extract_amount(text: str):
             re.IGNORECASE
         )
 
-        if match:
+        if not match:
+            continue
 
-            value = match.group(1).replace(",", "")
+        value = match.group(1).replace(
+            ",",
+            ""
+        )
 
-            try:
+        try:
 
-                amount = float(value)
+            amount = float(value)
 
-                if amount > 0:
-                    return amount
+            if amount > 0:
+                return amount
 
-            except ValueError:
-                pass
+        except ValueError:
+            pass
 
     return None
 
@@ -154,7 +215,6 @@ def extract_transaction_type(text: str):
         if word in value:
             return "CREDIT_NOTE"
 
-
     # --------------------------------------------------------
     # RETURN
     # --------------------------------------------------------
@@ -177,7 +237,6 @@ def extract_transaction_type(text: str):
 
         if word in value:
             return "RETURN"
-
 
     # --------------------------------------------------------
     # PAYMENT
@@ -206,7 +265,6 @@ def extract_transaction_type(text: str):
         if word in value:
             return "PAYMENT"
 
-
     # --------------------------------------------------------
     # PURCHASE
     # --------------------------------------------------------
@@ -216,14 +274,12 @@ def extract_transaction_type(text: str):
         "purchased",
         "buy",
         "bought",
-
         "purchase hua",
         "purchase hui",
         "purchase ki",
         "purchase kiya",
         "purchase kar",
 
-        # Hindi
         "खरीद",
         "खरीदा",
         "खरीदी",
@@ -231,20 +287,13 @@ def extract_transaction_type(text: str):
         "खरीद की",
         "खरीदा है",
 
-        # Common ASR variations
         "परचेस",
         "परचेज",
-        "पर्चेस",
-        "पर्चेज",
         "परचेस हुआ",
         "परचेज हुआ",
         "परचेस की",
         "परचेज की",
 
-        # Common bad speech-recognition result
-        "प्रतिशत",
-
-        # Natural business speech
         "माल लिया",
         "माल लिया है",
         "सामान लिया",
@@ -267,16 +316,18 @@ def extract_supplier_name(text: str):
 
     patterns = [
 
+        # ----------------------------------------------------
+        # ENGLISH / HINGLISH
+        # ----------------------------------------------------
+
         # ABC se ₹100
         r'(.+?)\s+se\s+(?:₹|rs\.?|rupees?|[0-9])',
 
         # ABC se purchase
-        r'(.+?)\s+se\s+'
-        r'(?:purchase|purchased|payment|return|credit)',
+        r'(.+?)\s+se\s+(?:purchase|purchased|payment|return|credit)',
 
         # ABC se ... hua/kiya
-        r'(.+?)\s+se\s+.*?'
-        r'(?:hua|hui|ki|kiya|kiye|liya|liye)',
+        r'(.+?)\s+se\s+.*?(?:hua|hui|ki|kiya|kiye|liya|liye)',
 
         # ABC ko ₹100
         r'(.+?)\s+ko\s+(?:₹|rs\.?|rupees?|[0-9])',
@@ -284,17 +335,20 @@ def extract_supplier_name(text: str):
         # ABC ko payment
         r'(.+?)\s+ko\s+(?:payment|pay|paid)',
 
-        # Hindi: ABC से ₹100
+        # ----------------------------------------------------
+        # HINDI
+        # ----------------------------------------------------
+
+        # ABC से ₹100
         r'(.+?)\s+से\s+(?:₹|[0-9])',
 
-        # Hindi: ABC से purchase
-        r'(.+?)\s+से\s+.*?'
-        r'(?:परचेस|परचेज|पर्चेस|पर्चेज|प्रतिशत|पेमेंट|रिटर्न|खरीद)',
+        # ABC से purchase / परचेज / खरीद
+        r'(.+?)\s+से\s+.*?(?:परचेस|परचेज|पेमेंट|रिटर्न|खरीद)',
 
-        # Hindi: ABC को ₹100
+        # ABC को ₹100
         r'(.+?)\s+को\s+(?:₹|[0-9])',
 
-        # Hindi: ABC को payment
+        # ABC को payment
         r'(.+?)\s+को\s+.*?(?:पेमेंट|भुगतान)',
     ]
 
@@ -306,31 +360,35 @@ def extract_supplier_name(text: str):
             re.IGNORECASE
         )
 
-        if match:
+        if not match:
+            continue
 
-            supplier = match.group(1).strip()
+        supplier = match.group(1).strip()
 
-            supplier = re.sub(
-                r'^(from|to|supplier)\s+',
-                '',
-                supplier,
-                flags=re.IGNORECASE
-            )
+        supplier = re.sub(
+            r'^(from|to|supplier)\s+',
+            '',
+            supplier,
+            flags=re.IGNORECASE
+        )
 
-            supplier = supplier.strip(" ,.-")
+        supplier = supplier.strip(
+            " ,.-"
+        )
 
-            if supplier:
+        if not supplier:
+            continue
 
-                # Remove common speech filler words
-                supplier = re.sub(
-                    r'^(से|को|का|की|के)\s+',
-                    '',
-                    supplier,
-                    flags=re.IGNORECASE
-                ).strip()
+        # Remove speech filler words
+        supplier = re.sub(
+            r'^(से|को|का|की|के)\s+',
+            '',
+            supplier,
+            flags=re.IGNORECASE
+        ).strip()
 
-                if supplier:
-                    return supplier
+        if supplier:
+            return supplier
 
     return None
 
@@ -357,22 +415,24 @@ def local_extract_transaction(text: str):
         flush=True
     )
 
-
     # --------------------------------------------------------
     # Transaction schema requires transaction_type.
-    # Never create Transaction with None transaction_type.
+    #
+    # Never create:
+    #
+    # transaction_type=None
+    #
+    # If type is missing, AI extraction handles it.
     # --------------------------------------------------------
 
     if transaction_type is None:
 
         print(
-            "LOCAL EXTRACTION INCOMPLETE: "
-            "transaction type not found",
+            "LOCAL EXTRACTION INCOMPLETE: transaction type not found",
             flush=True
         )
 
         return None
-
 
     return Transaction(
         transaction_type=transaction_type,
@@ -401,7 +461,7 @@ PAYMENT
 RETURN
 CREDIT_NOTE
 
-Return ONLY one JSON object.
+Return ONLY valid JSON.
 
 Required JSON structure:
 
@@ -443,38 +503,37 @@ Rules:
 
 13. Do not create, update or delete transactions.
 
-14. For a normal purchase such as:
-"Havells se 500 ka maal liya"
-use PURCHASE.
+14. Understand common speech-recognition mistakes.
 
-15. Speech-recognition variations such as:
-"प्रतिशत"
-"परचेस"
-"परचेज"
-"पर्चेस"
-"पर्चेज"
-when they clearly describe buying/purchasing,
-should be interpreted as PURCHASE.
+15. Currency may be transcribed incorrectly.
+    For example:
+    "Rs 200"
+    "आईएस 200"
+    "आरएस 200"
+    "200 रुपये"
+    "200 का"
+    should all be interpreted as amount 200.
 
-16. For:
-"Havells se 500 ka payment kiya"
-use PAYMENT.
+16. For a normal purchase such as:
+    "Havells se 500 ka maal liya"
+    use PURCHASE.
 
 17. For:
-"Havells ka 500 ka maal return kiya"
-use RETURN.
+    "Havells se 500 ka payment kiya"
+    use PAYMENT.
 
 18. For:
-"Havells ka 500 ka credit note"
-use CREDIT_NOTE.
+    "Havells ka 500 ka maal return kiya"
+    use RETURN.
 
-19. Return exactly ONE transaction object, never an array/list.
+19. For:
+    "Havells ka 500 ka credit note"
+    use CREDIT_NOTE.
 
 User message:
 
 {text}
 """
-
 
     try:
 
@@ -504,13 +563,11 @@ User message:
             f"AI transaction extraction failed: {e}"
         )
 
-
     if not response.choices:
 
         raise ValueError(
             "AI extractor returned no choices"
         )
-
 
     data = response.choices[0].message.content
 
@@ -520,132 +577,16 @@ User message:
             "AI extractor returned empty response"
         )
 
-
     print(
         "AI TRANSACTION RAW:",
         repr(data),
         flush=True
     )
 
-
-    # --------------------------------------------------------
-    # Parse JSON safely
-    # --------------------------------------------------------
-
     try:
 
-        parsed = json.loads(data)
-
-    except Exception as e:
-
-        print(
-            "AI TRANSACTION JSON PARSE ERROR:",
-            repr(e),
-            flush=True
-        )
-
-        raise ValueError(
-            f"AI transaction JSON parsing failed: {e}"
-        )
-
-
-    # --------------------------------------------------------
-    # IMPORTANT FIX:
-    # AI sometimes returns:
-    #
-    # [
-    #   {...}
-    # ]
-    #
-    # instead of:
-    #
-    # {...}
-    #
-    # Handle that safely.
-    # --------------------------------------------------------
-
-    if isinstance(parsed, list):
-
-        print(
-            "AI TRANSACTION RETURNED LIST - "
-            "USING FIRST OBJECT",
-            flush=True
-        )
-
-        if not parsed:
-
-            raise ValueError(
-                "AI extractor returned an empty list"
-            )
-
-        parsed = parsed[0]
-
-
-    if not isinstance(parsed, dict):
-
-        raise ValueError(
-            "AI extractor returned invalid transaction format"
-        )
-
-
-    # --------------------------------------------------------
-    # Normalize transaction type
-    # --------------------------------------------------------
-
-    transaction_type = parsed.get(
-        "transaction_type"
-    )
-
-    if transaction_type is not None:
-
-        transaction_type = str(
-            transaction_type
-        ).upper().strip()
-
-        # Extra protection against common ASR/AI variants
-        if transaction_type in [
-            "PURCHASE",
-            "BUY",
-            "BOUGHT",
-            "परचेस",
-            "परचेज",
-            "पर्चेस",
-            "पर्चेज",
-            "प्रतिशत",
-        ]:
-            transaction_type = "PURCHASE"
-
-        elif transaction_type in [
-            "PAYMENT",
-            "PAID",
-            "PAY",
-        ]:
-            transaction_type = "PAYMENT"
-
-        elif transaction_type in [
-            "RETURN",
-            "RETURNED",
-        ]:
-            transaction_type = "RETURN"
-
-        elif transaction_type in [
-            "CREDIT",
-            "CREDIT NOTE",
-            "CREDIT_NOTE",
-        ]:
-            transaction_type = "CREDIT_NOTE"
-
-        parsed["transaction_type"] = transaction_type
-
-
-    # --------------------------------------------------------
-    # Validate final transaction
-    # --------------------------------------------------------
-
-    try:
-
-        transaction = Transaction.model_validate(
-            parsed
+        transaction = Transaction.model_validate_json(
+            data
         )
 
     except Exception as e:
@@ -659,7 +600,6 @@ User message:
         raise ValueError(
             f"AI transaction data validation failed: {e}"
         )
-
 
     return transaction
 
@@ -678,15 +618,13 @@ def extract_transaction(text: str):
             "Transaction text cannot be empty"
         )
 
-
     # --------------------------------------------------------
-    # FIRST: deterministic local extraction
+    # FIRST: LOCAL EXTRACTION
     # --------------------------------------------------------
 
     transaction = local_extract_transaction(
         text
     )
-
 
     if transaction is not None:
 
@@ -695,24 +633,19 @@ def extract_transaction(text: str):
             flush=True
         )
 
-        # Keep current behavior:
-        # processor.py handles missing date.
-
+        # Local extractor does not parse dates.
         transaction.transaction_date = None
 
-
+        # Validate amount
         if transaction.amount is not None:
 
             if transaction.amount <= 0:
-
                 transaction.amount = None
-
 
         return transaction
 
-
     # --------------------------------------------------------
-    # SECOND: AI extraction
+    # SECOND: AI EXTRACTION
     # --------------------------------------------------------
 
     print(
@@ -720,11 +653,9 @@ def extract_transaction(text: str):
         flush=True
     )
 
-
     transaction = ai_extract_transaction(
         text
     )
-
 
     # --------------------------------------------------------
     # Never invent a date
@@ -734,7 +665,6 @@ def extract_transaction(text: str):
 
         transaction.transaction_date = None
 
-
     # --------------------------------------------------------
     # Amount validation
     # --------------------------------------------------------
@@ -742,8 +672,6 @@ def extract_transaction(text: str):
     if transaction.amount is not None:
 
         if transaction.amount <= 0:
-
             transaction.amount = None
-
 
     return transaction
