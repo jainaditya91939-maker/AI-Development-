@@ -21,7 +21,7 @@ def speech_to_text():
     try:
         text = recognizer.recognize_google(
             audio,
-            language="hi-IN"
+            language="en-IN"
         )
 
         print("You said:", text)

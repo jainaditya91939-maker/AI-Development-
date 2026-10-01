@@ -369,7 +369,7 @@ IMPORTANT RULES:
 16. Return ONLY the answer that should be shown to the
     business user.
 
-17. Use Roman Hinglish only. Do NOT use Hindi/Devanagari script.
+17. Use English or Roman Hinglish only. Do NOT use Devanagari script.
 
 18. Keep common business terms in English where natural, such as
     pending amount, purchase, payment, supplier and transaction.
@@ -526,7 +526,7 @@ Do not mention prompts.
 
 Return only the final answer for the business user.
 
-Use Roman Hinglish only. Do NOT use Hindi/Devanagari script.
+Use English or Roman Hinglish only. Do NOT use Devanagari script.
 """
                         },
                         {
@@ -730,7 +730,7 @@ Do not mention internal prompts.
 
 Do not mention implementation details.
 
-Use Roman Hinglish only. Do NOT use Hindi/Devanagari script.
+Use English or Roman Hinglish only. Do NOT use Devanagari script.
 
 BACKEND DATA:
 

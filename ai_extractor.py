@@ -31,36 +31,27 @@ def has_explicit_date(text: str) -> bool:
     date_pattern = re.compile(
         r"""
         (
-            \b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}\b
+            \\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{4}\\b
 
             |
 
-            \b\d{1,2}\s+
+            \\b\\d{1,2}\\s+
             (?:
                 january|february|march|april|may|june|
                 july|august|september|october|november|december|
                 jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec
             )
-            \s+\d{4}\b
+            \\s+\\d{4}\\b
 
             |
 
-            \b
+            \\b
             (?:
                 january|february|march|april|may|june|
                 july|august|september|october|november|december|
                 jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
             )
-            \s+\d{1,2},?\s+\d{4}\b
-
-            |
-
-            \b\d{1,2}\s+
-            (?:
-                जनवरी|फरवरी|फ़रवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|
-                सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर
-            )
-            \s+\d{4}\b
+            \\s+\\d{1,2},?\\s+\\d{4}\\b
         )
         """,
         re.IGNORECASE | re.VERBOSE
@@ -76,89 +67,29 @@ def has_explicit_date(text: str) -> bool:
 def extract_amount(text: str):
 
     """
-    Generic amount extraction.
+    Generic English / Roman-Hinglish amount extraction.
 
-    IMPORTANT:
-    This function does NOT depend on supplier/company name.
-
-    It supports:
+    Supports:
         ₹500
         ₹ 500
         Rs 500
         Rs. 500
         500 rupees
-        500 रुपये
-        500 रुपए
-        500 रुपया
+        500 rs
         500 ka
-        500 का
-        500 की
-        500 के
-
-    It also handles common ASR mistakes such as:
-        आईएस 500
-        आरएस 500
-        आई एस 500
-        आर एस 500
+        500 ki
+        500 ke
     """
 
     patterns = [
 
-        # ----------------------------------------------------
-        # STANDARD CURRENCY SYMBOL
-        # ----------------------------------------------------
+        r'₹\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
+        r'\\brs\\.?\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
+        r'\\brupees?\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
+        r'([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*rupees?',
+        r'([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*rs\\.?',
 
-        r'₹\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        # ----------------------------------------------------
-        # ENGLISH CURRENCY WORDS
-        # ----------------------------------------------------
-
-        r'\brs\.?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        r'\brupees?\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        # ----------------------------------------------------
-        # HINDI / ASR CURRENCY VARIANTS
-        # ----------------------------------------------------
-
-        r'\bआईएस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        r'\bआई\s*एस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        r'\bआरएस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        r'\bआर\s*एस\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
-
-        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपये',
-
-        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपए',
-
-        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*रुपया',
-
-        # ----------------------------------------------------
-        # ENGLISH NUMBER + RUPEES
-        # ----------------------------------------------------
-
-        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?',
-
-        # ----------------------------------------------------
-        # HINDI / HINGLISH SPEECH
-        #
-        # Examples:
-        # 500 ka
-        # 500 ki
-        # 500 ke
-        # 500 का
-        # 500 की
-        # 500 के
-        #
-        # No \b after Hindi characters.
-        # ----------------------------------------------------
-
-        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:ka|ki|ke)(?=\s|$|[.,!?])',
-
-        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:का|की|के)(?=\s|$|[.,!?])',
+        r'(?:₹\\s*)?([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*(?:ka|ki|ke)(?=\\s|$|[.,!?])',
     ]
 
     for pattern in patterns:
@@ -172,13 +103,9 @@ def extract_amount(text: str):
         if not match:
             continue
 
-        value = match.group(1).replace(
-            ",",
-            ""
-        )
+        value = match.group(1).replace(",", "")
 
         try:
-
             amount = float(value)
 
             if amount > 0:
@@ -198,26 +125,15 @@ def extract_transaction_type(text: str):
 
     value = text.lower().strip()
 
-    # --------------------------------------------------------
-    # CREDIT NOTE
-    # --------------------------------------------------------
-
     credit_words = [
         "credit note",
         "credit_note",
         "credit",
-        "क्रेडिट नोट",
-        "क्रेडिट",
     ]
 
     for word in credit_words:
-
         if word in value:
             return "CREDIT_NOTE"
-
-    # --------------------------------------------------------
-    # RETURN
-    # --------------------------------------------------------
 
     return_words = [
         "return",
@@ -226,21 +142,11 @@ def extract_transaction_type(text: str):
         "return hui",
         "return ki",
         "return kiya",
-        "वापस",
-        "वापसी",
-        "रिटर्न",
-        "रिटर्न हुआ",
-        "रिटर्न की",
     ]
 
     for word in return_words:
-
         if word in value:
             return "RETURN"
-
-    # --------------------------------------------------------
-    # PAYMENT
-    # --------------------------------------------------------
 
     payment_words = [
         "payment",
@@ -249,25 +155,12 @@ def extract_transaction_type(text: str):
         "payment ki",
         "payment hua",
         "payment kiya",
-        "दे दिया",
-        "दे दिए",
-        "दिया",
-        "दिए",
-        "भुगतान",
-        "पेमेंट",
-        "पेमेंट हुआ",
-        "पेमेंट की",
-        "पे किया",
+        "pay kiya",
     ]
 
     for word in payment_words:
-
         if word in value:
             return "PAYMENT"
-
-    # --------------------------------------------------------
-    # PURCHASE
-    # --------------------------------------------------------
 
     purchase_words = [
         "purchase",
@@ -279,29 +172,13 @@ def extract_transaction_type(text: str):
         "purchase ki",
         "purchase kiya",
         "purchase kar",
-
-        "खरीद",
-        "खरीदा",
-        "खरीदी",
-        "खरीद हुआ",
-        "खरीद की",
-        "खरीदा है",
-
-        "परचेस",
-        "परचेज",
-        "परचेस हुआ",
-        "परचेज हुआ",
-        "परचेस की",
-        "परचेज की",
-
-        "माल लिया",
-        "माल लिया है",
-        "सामान लिया",
-        "सामान खरीदा",
+        "maal liya",
+        "maal liya hai",
+        "samaan liya",
+        "samaan kharida",
     ]
 
     for word in purchase_words:
-
         if word in value:
             return "PURCHASE"
 
@@ -315,41 +192,11 @@ def extract_transaction_type(text: str):
 def extract_supplier_name(text: str):
 
     patterns = [
-
-        # ----------------------------------------------------
-        # ENGLISH / HINGLISH
-        # ----------------------------------------------------
-
-        # ABC se ₹100
-        r'(.+?)\s+se\s+(?:₹|rs\.?|rupees?|[0-9])',
-
-        # ABC se purchase
-        r'(.+?)\s+se\s+(?:purchase|purchased|payment|return|credit)',
-
-        # ABC se ... hua/kiya
-        r'(.+?)\s+se\s+.*?(?:hua|hui|ki|kiya|kiye|liya|liye)',
-
-        # ABC ko ₹100
-        r'(.+?)\s+ko\s+(?:₹|rs\.?|rupees?|[0-9])',
-
-        # ABC ko payment
-        r'(.+?)\s+ko\s+(?:payment|pay|paid)',
-
-        # ----------------------------------------------------
-        # HINDI
-        # ----------------------------------------------------
-
-        # ABC से ₹100
-        r'(.+?)\s+से\s+(?:₹|[0-9])',
-
-        # ABC से purchase / परचेज / खरीद
-        r'(.+?)\s+से\s+.*?(?:परचेस|परचेज|पेमेंट|रिटर्न|खरीद)',
-
-        # ABC को ₹100
-        r'(.+?)\s+को\s+(?:₹|[0-9])',
-
-        # ABC को payment
-        r'(.+?)\s+को\s+.*?(?:पेमेंट|भुगतान)',
+        r'(.+?)\\s+se\\s+(?:₹|rs\\.?|rupees?|[0-9])',
+        r'(.+?)\\s+se\\s+(?:purchase|purchased|payment|return|credit)',
+        r'(.+?)\\s+se\\s+.*?(?:hua|hui|ki|kiya|kiye|liya|liye)',
+        r'(.+?)\\s+ko\\s+(?:₹|rs\\.?|rupees?|[0-9])',
+        r'(.+?)\\s+ko\\s+(?:payment|pay|paid)',
     ]
 
     for pattern in patterns:
@@ -366,26 +213,13 @@ def extract_supplier_name(text: str):
         supplier = match.group(1).strip()
 
         supplier = re.sub(
-            r'^(from|to|supplier)\s+',
+            r'^(from|to|supplier)\\s+',
             '',
             supplier,
             flags=re.IGNORECASE
         )
 
-        supplier = supplier.strip(
-            " ,.-"
-        )
-
-        if not supplier:
-            continue
-
-        # Remove speech filler words
-        supplier = re.sub(
-            r'^(से|को|का|की|के)\s+',
-            '',
-            supplier,
-            flags=re.IGNORECASE
-        ).strip()
+        supplier = supplier.strip(" ,.-")
 
         if supplier:
             return supplier
@@ -393,7 +227,6 @@ def extract_supplier_name(text: str):
     return None
 
 
-# ============================================================
 # LOCAL EXTRACTION
 # ============================================================
 
@@ -477,7 +310,7 @@ Required JSON structure:
 
 Rules:
 
-1. Understand English, Hindi and Hinglish.
+1. Understand English and Roman Hinglish only.
 
 2. Extract supplier name if explicitly mentioned.
 
@@ -508,10 +341,10 @@ Rules:
 15. Currency may be transcribed incorrectly.
     For example:
     "Rs 200"
-    "आईएस 200"
-    "आरएस 200"
-    "200 रुपये"
-    "200 का"
+
+
+
+
     should all be interpreted as amount 200.
 
 16. For a normal purchase such as:

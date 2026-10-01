@@ -111,176 +111,15 @@ def normalize_supplier_name(name: str) -> str:
 
     value = str(name).lower().strip()
 
-    # ========================================================
-    # HINDI / HINGLISH SPEECH RECOGNITION ALIASES
-    # ========================================================
-
-    hindi_aliases = {
-
-        # HAVELLS
-        "हैवेल्स": "havells",
-        "हैवेल": "havells",
-        "हैवल्स": "havells",
-        "हैवल": "havells",
-        "हैवेलस": "havells",
-        "हैवन्स": "havells",
-        "हैवंत": "havells",
-
-        # POLYCAB
-        "पॉलीकैब": "polycab",
-        "पॉली कैब": "polycab",
-        "पोलिकैब": "polycab",
-        "पोलीकैब": "polycab",
-        "पोली कैब": "polycab",
-        "होलीकैब": "polycab",
-        "होली कैब": "polycab",
-        "होलीकेब": "polycab",
-        "होली केब": "polycab",
-        "पॉली केब": "polycab",
-        "पोलि कैब": "polycab",
-
-        # ENGLISH ASR VARIANTS
-        "policy": "polycab",
-        "pollycab": "polycab",
-        "poly cab": "polycab",
-        "polly cab": "polycab",
-
-        # ANCHOR
-        "एंकर": "anchor",
-
-        # FINOLEX
-        "फिनोलेक्स": "finolex",
-
-        # SCHNEIDER
-        "श्नाइडर": "schneider",
-        "स्नाइडर": "schneider",
-
-        # PHILIPS
-        "फिलिप्स": "philips",
-
-        # CROMPTON
-        "क्रॉम्पटन": "crompton",
-        "क्रोम्पटन": "crompton",
-
-        # LEGRAND
-        "लेग्रैंड": "legrand",
-        "लेग्रां": "legrand",
-
-        # WIPRO
-        "विप्रो": "wipro",
-
-        # BAJAJ
-        "बजाज": "bajaj",
-
-        # RR
-        "आरआर": "rr",
-        "आर आर": "rr",
-
-        # COMMON BUSINESS WORDS
-        "इलेक्ट्रिकल": "electrical",
-        "इलेक्ट्रिकल्स": "electricals",
-        "ट्रेडर्स": "traders",
-        "ट्रेडर": "trader",
-        "एंटरप्राइजेज": "enterprises",
-        "एंटरप्राइज": "enterprise",
-        "इंडस्ट्रीज": "industries",
-        "इंडस्ट्री": "industry",
-        "कॉर्पोरेशन": "corporation",
-        "कंपनी": "company",
-
-        # COMMON ASR LETTERS
-        "एबीसी": "abc",
-        "ए बी सी": "abc",
-        "आरएस": "rs",
-        "आर एस": "rs",
-        "एबी": "ab",
-        "ए बी": "ab",
-        "एक्सवाईजेड": "xyz",
-        "एक्स वाई जेड": "xyz",
-    }
-
-    if value in hindi_aliases:
-        return hindi_aliases[value]
-
-    # ========================================================
-    # PHRASE REPLACEMENTS
-    # ========================================================
-
-    phrase_aliases = {
-        "एबीसी इलेक्ट्रिकल": "abc electrical",
-        "ए बी सी इलेक्ट्रिकल": "abc electrical",
-        "एबीसी इलेक्ट्रिकल्स": "abc electricals",
-        "ए बी सी इलेक्ट्रिकल्स": "abc electricals",
-
-        "पॉलीकैब इलेक्ट्रिकल": "polycab electrical",
-        "पॉलीकैब इलेक्ट्रिकल्स": "polycab electricals",
-
-        "हैवेल्स इलेक्ट्रिकल": "havells electrical",
-        "हैवेल्स इलेक्ट्रिकल्स": "havells electricals",
-
-        "एंकर इलेक्ट्रिकल": "anchor electrical",
-        "फिनोलेक्स इलेक्ट्रिकल": "finolex electrical",
-
-        "क्रॉम्पटन इलेक्ट्रिकल": "crompton electrical",
-        "लेग्रैंड इलेक्ट्रिकल": "legrand electrical",
-        "श्नाइडर इलेक्ट्रिकल": "schneider electrical",
-    }
-
-    if value in phrase_aliases:
-        return phrase_aliases[value]
-
-    # Longest phrases first
-    for hindi_phrase, english_phrase in sorted(
-        phrase_aliases.items(),
-        key=lambda item: len(item[0]),
-        reverse=True
-    ):
-        value = value.replace(
-            hindi_phrase,
-            english_phrase
-        )
-
-    # ========================================================
-    # WORD LEVEL REPLACEMENT
-    # ========================================================
-
-    words = value.split()
-    converted_words = []
-
-    for word in words:
-        converted_words.append(
-            hindi_aliases.get(word, word)
-        )
-
-    value = " ".join(converted_words)
-
-    # ========================================================
-    # REMOVE COMPANY SUFFIXES
-    # ========================================================
-
+    # English / Roman-Hinglish supplier names only.
     value = re.sub(
-        r"\b(private limited|pvt ltd|pvt\. ltd\.|"
-        r"private ltd|limited|ltd|llp|incorporated|inc)\b",
+        r"[^a-z0-9\\s.&-]",
         " ",
         value
     )
 
-    # ========================================================
-    # REMOVE PUNCTUATION
-    # ========================================================
-
     value = re.sub(
-        r"[^a-z0-9\s]",
-        " ",
-        value
-    )
-
-    # ========================================================
-    # NORMALIZE WHITESPACE
-    # ========================================================
-
-    value = re.sub(
-        r"\s+",
+        r"\\s+",
         " ",
         value
     ).strip()
@@ -297,29 +136,24 @@ def normalize_supplier_display_name(name: str) -> str:
     if not name:
         return ""
 
-    original = str(name).strip()
-
-    normalized = normalize_supplier_name(original)
+    normalized = normalize_supplier_name(name)
 
     if not normalized:
-        return original
+        return ""
 
     words = normalized.split()
-
     final_words = []
 
     for word in words:
 
-        # Preserve common acronyms
         if word in {
             "abc",
             "xyz",
             "rs",
             "rr",
             "ab",
-            "hv",
-            "lt",
-            "ht"
+            "sk",
+            "mk",
         }:
             final_words.append(word.upper())
             continue
@@ -477,134 +311,92 @@ def find_supplier(
         requested
     )
 
-    # ========================================================
-    # 1. NORMALIZED MATCH FIRST
-    #
-    # IMPORTANT:
-    # Do this BEFORE raw exact match.
-    #
-    # Example:
-    # एबीसी इलेक्ट्रिकल
-    # ->
-    # abc electrical
-    #
-    # DB:
-    # ABC Electrical
-    # एबीसी इलेक्ट्रिकल
-    #
-    # Prefer the normalized English/Hinglish record.
-    # ========================================================
-
-    normalized_matches = []
-
-    if requested_normalized:
-
-        for supplier in suppliers:
-
-            db_name = str(
-                supplier.get("name", "")
-            ).strip()
-
-            db_normalized = normalize_supplier_name(
-                db_name
-            )
-
-            if (
-                db_normalized
-                and
-                requested_normalized == db_normalized
-            ):
-                normalized_matches.append(
-                    supplier
-                )
-
-    if normalized_matches:
-
-        # Prefer a supplier whose stored name
-        # is already English/Hinglish.
-        latin_matches = [
-            supplier
-            for supplier in normalized_matches
-            if not contains_devanagari(
-                str(supplier.get("name", ""))
-            )
-        ]
-
-        if latin_matches:
-            return latin_matches[0]
-
-        return normalized_matches[0]
-
-    # ========================================================
-    # 2. RAW EXACT MATCH
-    # ========================================================
-
+    # 1. Exact normalized match
     for supplier in suppliers:
 
         db_name = str(
             supplier.get("name", "")
         ).strip()
 
+        db_normalized = normalize_supplier_name(
+            db_name
+        )
+
         if (
-            db_name.lower()
-            == requested.lower()
+            requested_normalized
+            and
+            requested_normalized == db_normalized
         ):
             return supplier
 
-    # ========================================================
-    # 3. TOKEN CONTAINMENT
-    # ========================================================
-
-    requested_tokens = supplier_tokens(
-        requested
-    )
-
-    containment_matches = []
-
+    # 2. Raw exact match
     for supplier in suppliers:
 
         db_name = str(
             supplier.get("name", "")
-        )
+        ).strip()
 
-        db_tokens = supplier_tokens(
-            db_name
-        )
+        if db_name.lower() == requested.lower():
+            return supplier
 
-        if not requested_tokens or not db_tokens:
-            continue
+    # 3. Token containment
+    requested_tokens = supplier_tokens(requested)
 
-        common_tokens = (
-            requested_tokens
-            .intersection(db_tokens)
-        )
+    if requested_tokens:
 
-        if not common_tokens:
-            continue
+        containment_matches = []
 
-        smaller_count = min(
-            len(requested_tokens),
-            len(db_tokens)
-        )
+        for supplier in suppliers:
 
-        containment = (
-            len(common_tokens) /
-            smaller_count
-        )
-
-        if containment == 1.0:
-
-            containment_matches.append(
-                supplier
+            db_name = str(
+                supplier.get("name", "")
             )
 
-    if len(containment_matches) == 1:
-        return containment_matches[0]
+            db_tokens = supplier_tokens(db_name)
 
-    # ========================================================
-    # 4. FUZZY MATCHING
-    # ========================================================
+            if not db_tokens:
+                continue
 
+            common_tokens = (
+                requested_tokens.intersection(
+                    db_tokens
+                )
+            )
+
+            if not common_tokens:
+                continue
+
+            # A generic single word such as
+            # "Electrical" must NOT match
+            # "Sharma Electrical".
+            if (
+                len(common_tokens) == 1
+                and
+                len(db_tokens) == 1
+                and
+                len(requested_tokens) > 1
+            ):
+                continue
+
+            smaller_count = min(
+                len(requested_tokens),
+                len(db_tokens)
+            )
+
+            containment = (
+                len(common_tokens) /
+                smaller_count
+            )
+
+            if containment == 1.0:
+                containment_matches.append(
+                    supplier
+                )
+
+        if len(containment_matches) == 1:
+            return containment_matches[0]
+
+    # 4. Fuzzy matching
     matches = []
 
     for supplier in suppliers:
@@ -633,13 +425,7 @@ def find_supplier(
         reverse=True
     )
 
-    best_score, best_supplier = (
-        matches[0]
-    )
-
-    # ========================================================
-    # AMBIGUITY PROTECTION
-    # ========================================================
+    best_score, best_supplier = matches[0]
 
     if len(matches) > 1:
 
@@ -652,31 +438,10 @@ def find_supplier(
         ):
             return None
 
-    # ========================================================
-    # HIGH CONFIDENCE FUZZY MATCH
-    # ========================================================
-
     if best_score >= 0.78:
         return best_supplier
 
     return None
-
-
-# ============================================================
-# DEVANAGARI DETECTION
-# ============================================================
-
-def contains_devanagari(value: str) -> bool:
-
-    if not value:
-        return False
-
-    return bool(
-        re.search(
-            r"[\u0900-\u097F]",
-            str(value)
-        )
-    )
 
 
 # ============================================================
