@@ -13,7 +13,10 @@ from fastapi import (
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
 from pydantic import BaseModel
 
 
@@ -47,12 +50,15 @@ app.add_middleware(
 # AUTH
 # ============================================================
 
-security = HTTPBearer(auto_error=True)
+security = HTTPBearer(
+    auto_error=True
+)
 
 
 def get_token(
     credentials: HTTPAuthorizationCredentials,
 ) -> str:
+
     return credentials.credentials
 
 
@@ -74,8 +80,11 @@ class VoiceTransactionRequest(BaseModel):
 
 @app.get("/")
 def home():
+
     return {
-        "message": "AI Business Investigator AI Service is running!"
+        "message": (
+            "AI Business Investigator AI Service is running!"
+        )
     }
 
 
@@ -85,10 +94,13 @@ def home():
 
 @app.get("/api/v1/ai/investigate")
 def investigate(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(
+        security
+    ),
 ):
+
     try:
-        # Lazy import
+
         from final_intelligence import (
             generate_final_intelligence
         )
@@ -108,25 +120,32 @@ def investigate(
         raise
 
     except Exception as e:
+
         print(
             "========== INVESTIGATE ERROR ==========",
             flush=True,
         )
+
         print(
             "ERROR TYPE:",
             type(e).__name__,
             flush=True,
         )
+
         print(
             "ERROR:",
             repr(e),
             flush=True,
         )
+
         traceback.print_exc()
 
         raise HTTPException(
             status_code=500,
-            detail=f"AI investigation failed: {str(e)}",
+            detail=(
+                "AI investigation failed. "
+                "Please try again."
+            ),
         )
 
 
@@ -137,16 +156,20 @@ def investigate(
 @app.post("/api/v1/ai/investigate")
 def investigate_question(
     request: InvestigatorRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(
+        security
+    ),
 ):
+
     if not request.question.strip():
+
         raise HTTPException(
             status_code=400,
             detail="Question cannot be empty",
         )
 
     try:
-        # Lazy import
+
         from final_intelligence import (
             generate_final_intelligence
         )
@@ -168,25 +191,32 @@ def investigate_question(
         raise
 
     except Exception as e:
+
         print(
             "========== INVESTIGATE QUESTION ERROR ==========",
             flush=True,
         )
+
         print(
             "ERROR TYPE:",
             type(e).__name__,
             flush=True,
         )
+
         print(
             "ERROR:",
             repr(e),
             flush=True,
         )
+
         traceback.print_exc()
 
         raise HTTPException(
             status_code=500,
-            detail=f"AI investigation failed: {str(e)}",
+            detail=(
+                "AI investigation failed. "
+                "Please try again."
+            ),
         )
 
 
@@ -197,30 +227,34 @@ def investigate_question(
 @app.post("/api/v1/ai/voice/transaction")
 def voice_transaction(
     request: VoiceTransactionRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(
+        security
+    ),
 ):
+
     if not request.text.strip():
+
         raise HTTPException(
             status_code=400,
             detail="Voice text cannot be empty",
         )
 
-    try:
-        print(
-            "========== VOICE REQUEST ==========",
-            flush=True,
-        )
+    print(
+        "========== VOICE REQUEST ==========",
+        flush=True,
+    )
 
-        # Lazy import
+    print(
+        "Voice text:",
+        request.text,
+        flush=True,
+    )
+
+    try:
+
         from processor import process_transaction
 
         token = get_token(credentials)
-
-        print(
-            "Voice text:",
-            request.text,
-            flush=True,
-        )
 
         result = process_transaction(
             request.text,
@@ -239,26 +273,37 @@ def voice_transaction(
         raise
 
     except Exception as e:
+
         print(
-            "========== VOICE TRANSACTION ERROR ==========",
+            "========== UNEXPECTED VOICE ERROR ==========",
             flush=True,
         )
+
         print(
             "ERROR TYPE:",
             type(e).__name__,
             flush=True,
         )
+
         print(
             "ERROR:",
             repr(e),
             flush=True,
         )
+
         traceback.print_exc()
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"Voice transaction processing failed: {str(e)}",
-        )
+        # IMPORTANT:
+        # Do not expose internal stack/error details
+        # to the user.
+        return {
+            "status": "ERROR",
+            "message": (
+                "I could not process this voice transaction. "
+                "Please try again with supplier name, "
+                "amount and transaction type."
+            ),
+        }
 
 
 # ============================================================
@@ -268,10 +313,13 @@ def voice_transaction(
 @app.post("/api/v1/ai/invoice/transaction")
 def invoice_transaction(
     file: UploadFile = File(...),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials = Depends(
+        security
+    ),
 ):
+
     print(
-        "🔥🔥🔥 INVOICE ENDPOINT HIT 🔥🔥🔥",
+        "========== INVOICE ENDPOINT HIT ==========",
         flush=True,
     )
 
@@ -283,9 +331,13 @@ def invoice_transaction(
     }
 
     if file.content_type not in allowed_types:
+
         raise HTTPException(
             status_code=400,
-            detail="Only JPG, PNG or WEBP invoice images are allowed",
+            detail=(
+                "Only JPG, PNG or WEBP invoice images "
+                "are allowed"
+            ),
         )
 
     suffix = Path(
@@ -303,6 +355,7 @@ def invoice_transaction(
     temp_path = None
 
     try:
+
         print(
             "Invoice filename:",
             file.filename,
@@ -343,35 +396,15 @@ def invoice_transaction(
 
         token = get_token(credentials)
 
-        print(
-            "Token received.",
-            flush=True,
-        )
-
         # ----------------------------------------------------
-        # Lazy import
+        # Load processor
         # ----------------------------------------------------
-
-        print(
-            "Loading processor...",
-            flush=True,
-        )
 
         from processor import process_invoice
-
-        print(
-            "Processor loaded.",
-            flush=True,
-        )
 
         # ----------------------------------------------------
         # Process invoice
         # ----------------------------------------------------
-
-        print(
-            "Starting process_invoice...",
-            flush=True,
-        )
 
         result = process_invoice(
             temp_path,
@@ -384,19 +417,15 @@ def invoice_transaction(
             flush=True,
         )
 
-        print(
-            "🔥🔥🔥 INVOICE SUCCESS 🔥🔥🔥",
-            flush=True,
-        )
-
         return result
 
     except HTTPException:
         raise
 
     except Exception as e:
+
         print(
-            "🔥🔥🔥 INVOICE PROCESSING ERROR 🔥🔥🔥",
+            "========== INVOICE PROCESSING ERROR ==========",
             flush=True,
         )
 
@@ -414,19 +443,20 @@ def invoice_transaction(
 
         traceback.print_exc()
 
-        print(
-            "🔥🔥🔥 END INVOICE ERROR 🔥🔥🔥",
-            flush=True,
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invoice processing failed: {str(e)}",
-        )
+        return {
+            "status": "ERROR",
+            "message": (
+                "Invoice processing failed. "
+                "Please try again with a clearer image."
+            ),
+        }
 
     finally:
+
         if temp_path and os.path.exists(temp_path):
+
             try:
+
                 os.remove(temp_path)
 
                 print(
@@ -435,6 +465,7 @@ def invoice_transaction(
                 )
 
             except Exception as e:
+
                 print(
                     "Temporary file cleanup error:",
                     repr(e),
