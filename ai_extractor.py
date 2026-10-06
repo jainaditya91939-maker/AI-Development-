@@ -9,11 +9,6 @@ from schemas import Transaction
 
 load_dotenv()
 
-
-# ============================================================
-# OPENROUTER CLIENT
-# ============================================================
-
 api_key = os.getenv("OPENROUTER_API_KEY")
 
 client = OpenAI(
@@ -31,27 +26,36 @@ def has_explicit_date(text: str) -> bool:
     date_pattern = re.compile(
         r"""
         (
-            \\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{4}\\b
+            \b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}\b
 
             |
 
-            \\b\\d{1,2}\\s+
+            \b\d{1,2}\s+
             (?:
                 january|february|march|april|may|june|
                 july|august|september|october|november|december|
                 jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec
             )
-            \\s+\\d{4}\\b
+            \s+\d{4}\b
 
             |
 
-            \\b
+            \b
             (?:
                 january|february|march|april|may|june|
                 july|august|september|october|november|december|
                 jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
             )
-            \\s+\\d{1,2},?\\s+\\d{4}\\b
+            \s+\d{1,2},?\s+\d{4}\b
+
+            |
+
+            \b\d{1,2}\s+
+            (?:
+                जनवरी|फरवरी|फ़रवरी|मार्च|अप्रैल|मई|जून|जुलाई|अगस्त|
+                सितंबर|सितम्बर|अक्टूबर|नवंबर|नवम्बर|दिसंबर|दिसम्बर
+            )
+            \s+\d{4}\b
         )
         """,
         re.IGNORECASE | re.VERBOSE
@@ -66,30 +70,25 @@ def has_explicit_date(text: str) -> bool:
 
 def extract_amount(text: str):
 
-    """
-    Generic English / Roman-Hinglish amount extraction.
-
-    Supports:
-        ₹500
-        ₹ 500
-        Rs 500
-        Rs. 500
-        500 rupees
-        500 rs
-        500 ka
-        500 ki
-        500 ke
-    """
-
     patterns = [
 
-        r'₹\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
-        r'\\brs\\.?\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
-        r'\\brupees?\\s*([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)',
-        r'([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*rupees?',
-        r'([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*rs\\.?',
+        # ₹1000 / ₹ 1000 / ₹1,000.50
+        r'₹\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
 
-        r'(?:₹\\s*)?([0-9]+(?:,[0-9]+)*(?:\\.[0-9]+)?)\\s*(?:ka|ki|ke)(?=\\s|$|[.,!?])',
+        # Rs 1000 / Rs. 1000
+        r'(?:rs\.?|आईएस|आरएस)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
+        # rupees / rupee
+        r'(?:rupees?|रुपीस|रुपीज)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)',
+
+        # 1000 rupees
+        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?',
+
+        # 1000 रुपये / रुपए / रुपया
+        r'([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:रुपये|रुपए|रुपया|रुपीस|रुपीज)',
+
+        # 500 ka / 1000 का / ₹500 का
+        r'(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:ka|ki|ke|का|की|के)(?=\s|$|[.,!?])',
     ]
 
     for pattern in patterns:
@@ -100,19 +99,22 @@ def extract_amount(text: str):
             re.IGNORECASE
         )
 
-        if not match:
-            continue
+        if match:
 
-        value = match.group(1).replace(",", "")
+            value = match.group(1).replace(
+                ",",
+                ""
+            )
 
-        try:
-            amount = float(value)
+            try:
 
-            if amount > 0:
-                return amount
+                amount = float(value)
 
-        except ValueError:
-            pass
+                if amount > 0:
+                    return amount
+
+            except ValueError:
+                pass
 
     return None
 
@@ -125,15 +127,26 @@ def extract_transaction_type(text: str):
 
     value = text.lower().strip()
 
+    # --------------------------------------------------------
+    # CREDIT NOTE FIRST
+    # --------------------------------------------------------
+
     credit_words = [
         "credit note",
         "credit_note",
         "credit",
+        "क्रेडिट नोट",
+        "क्रेडिट",
     ]
 
     for word in credit_words:
+
         if word in value:
             return "CREDIT_NOTE"
+
+    # --------------------------------------------------------
+    # RETURN
+    # --------------------------------------------------------
 
     return_words = [
         "return",
@@ -142,11 +155,21 @@ def extract_transaction_type(text: str):
         "return hui",
         "return ki",
         "return kiya",
+        "वापस",
+        "वापसी",
+        "रिटर्न",
+        "रिटर्न हुआ",
+        "रिटर्न की",
     ]
 
     for word in return_words:
+
         if word in value:
             return "RETURN"
+
+    # --------------------------------------------------------
+    # PAYMENT
+    # --------------------------------------------------------
 
     payment_words = [
         "payment",
@@ -155,12 +178,25 @@ def extract_transaction_type(text: str):
         "payment ki",
         "payment hua",
         "payment kiya",
-        "pay kiya",
+        "दे दिया",
+        "दे दिए",
+        "दिया",
+        "दिए",
+        "भुगतान",
+        "पेमेंट",
+        "पेमेंट हुआ",
+        "पेमेंट की",
+        "पे किया",
     ]
 
     for word in payment_words:
+
         if word in value:
             return "PAYMENT"
+
+    # --------------------------------------------------------
+    # PURCHASE
+    # --------------------------------------------------------
 
     purchase_words = [
         "purchase",
@@ -172,13 +208,26 @@ def extract_transaction_type(text: str):
         "purchase ki",
         "purchase kiya",
         "purchase kar",
-        "maal liya",
-        "maal liya hai",
-        "samaan liya",
-        "samaan kharida",
+        "खरीद",
+        "खरीदा",
+        "खरीदी",
+        "खरीद हुआ",
+        "खरीद की",
+        "खरीदा है",
+        "परचेस",
+        "परचेज",
+        "परचेस हुआ",
+        "परचेज हुआ",
+        "परचेस की",
+        "परचेज की",
+        "माल लिया",
+        "माल लिया है",
+        "सामान लिया",
+        "सामान खरीदा",
     ]
 
     for word in purchase_words:
+
         if word in value:
             return "PURCHASE"
 
@@ -191,35 +240,91 @@ def extract_transaction_type(text: str):
 
 def extract_supplier_name(text: str):
 
+    """
+    Extract supplier name from common
+    English / Roman-Hinglish speech.
+    """
+
+    if not text:
+        return None
+
+    value = text.strip()
+
+    # --------------------------------------------------------
+    # Supplier + transaction type
+    #
+    # Examples:
+    #
+    # Haldiram purchase 2000 rupees
+    # Haldiram payment 500 rupees
+    # Haldiram return 1000 rupees
+    # Haldiram credit note 300 rupees
+    # --------------------------------------------------------
+
     patterns = [
-        r'(.+?)\\s+se\\s+(?:₹|rs\\.?|rupees?|[0-9])',
-        r'(.+?)\\s+se\\s+(?:purchase|purchased|payment|return|credit)',
-        r'(.+?)\\s+se\\s+.*?(?:hua|hui|ki|kiya|kiye|liya|liye)',
-        r'(.+?)\\s+ko\\s+(?:₹|rs\\.?|rupees?|[0-9])',
-        r'(.+?)\\s+ko\\s+(?:payment|pay|paid)',
+
+        r'^(.+?)\s+(?:purchase|purchased|buy|bought)\b',
+
+        r'^(.+?)\s+(?:payment|paid|pay)\b',
+
+        r'^(.+?)\s+(?:return|returned)\b',
+
+        r'^(.+?)\s+credit\s+note\b',
+
+        # Supplier + amount + transaction type
+        r'^(.+?)\s+(?:₹|rs\.?|rupees?)\s*[0-9][0-9,]*(?:\.[0-9]+)?\s+(?:purchase|payment|return|credit)\b',
+
+        # Supplier + se/from
+        r'^(.+?)\s+(?:se|from)\s+(?:₹|rs\.?|rupees?|[0-9])',
+
+        r'^(.+?)\s+(?:se|from)\s+(?:purchase|purchased|payment|paid|return|returned|credit)\b',
+
+        # Supplier + ko/to
+        r'^(.+?)\s+(?:ko|to)\s+(?:₹|rs\.?|rupees?|[0-9])',
+
+        r'^(.+?)\s+(?:ko|to)\s+(?:payment|paid|pay)\b',
+
+        # Example:
+        # purchase 2000 from Haldiram
+        # payment 500 from Havells
+        r'(?:purchase|purchased|buy|bought|payment|paid|pay|return|returned|credit(?:\s+note)?)\b.*?\bfrom\s+(.+?)(?:\s+(?:for|of)\b|$)',
     ]
 
     for pattern in patterns:
 
         match = re.search(
             pattern,
-            text,
+            value,
             re.IGNORECASE
         )
 
         if not match:
             continue
 
-        supplier = match.group(1).strip()
+        supplier = match.group(1).strip(" ,.-")
 
         supplier = re.sub(
-            r'^(from|to|supplier)\\s+',
+            r'^(from|to|supplier)\s+',
             '',
             supplier,
             flags=re.IGNORECASE
-        )
+        ).strip(" ,.-")
 
-        supplier = supplier.strip(" ,.-")
+        # Never return transaction keyword as supplier
+        if supplier.lower() in {
+            "purchase",
+            "purchased",
+            "buy",
+            "bought",
+            "payment",
+            "paid",
+            "pay",
+            "return",
+            "returned",
+            "credit",
+            "credit note",
+        }:
+            continue
 
         if supplier:
             return supplier
@@ -227,6 +332,7 @@ def extract_supplier_name(text: str):
     return None
 
 
+# ============================================================
 # LOCAL EXTRACTION
 # ============================================================
 
@@ -249,13 +355,16 @@ def local_extract_transaction(text: str):
     )
 
     # --------------------------------------------------------
+    # IMPORTANT FIX
+    #
     # Transaction schema requires transaction_type.
     #
-    # Never create:
+    # NEVER create Transaction with:
     #
     # transaction_type=None
     #
-    # If type is missing, AI extraction handles it.
+    # If type is missing, return None and let AI
+    # extractor handle the message.
     # --------------------------------------------------------
 
     if transaction_type is None:
@@ -311,6 +420,7 @@ Required JSON structure:
 Rules:
 
 1. Understand English and Roman Hinglish only.
+   Do not require Devanagari Hindi.
 
 2. Extract supplier name if explicitly mentioned.
 
@@ -318,7 +428,8 @@ Rules:
 
 4. Amount must be greater than zero.
 
-5. If amount is explicitly negative, return amount null.
+5. If amount is explicitly negative,
+   return amount null.
 
 6. Extract date ONLY if explicitly mentioned.
 
@@ -336,32 +447,21 @@ Rules:
 
 13. Do not create, update or delete transactions.
 
-14. Understand common speech-recognition mistakes.
+14. For a normal purchase such as:
+   "Havells se 500 ka maal liya"
+   use PURCHASE.
 
-15. Currency may be transcribed incorrectly.
-    For example:
-    "Rs 200"
+15. For:
+   "Havells se 500 ka payment kiya"
+   use PAYMENT.
 
-
-
-
-    should all be interpreted as amount 200.
-
-16. For a normal purchase such as:
-    "Havells se 500 ka maal liya"
-    use PURCHASE.
+16. For:
+   "Havells ka 500 ka maal return kiya"
+   use RETURN.
 
 17. For:
-    "Havells se 500 ka payment kiya"
-    use PAYMENT.
-
-18. For:
-    "Havells ka 500 ka maal return kiya"
-    use RETURN.
-
-19. For:
-    "Havells ka 500 ka credit note"
-    use CREDIT_NOTE.
+   "Havells ka 500 ka credit note"
+   use CREDIT_NOTE.
 
 User message:
 
@@ -372,7 +472,7 @@ User message:
 
         response = client.chat.completions.create(
             model="openrouter/free",
-            max_tokens=300,
+            max_tokens=180,
             messages=[
                 {
                     "role": "user",
@@ -452,7 +552,7 @@ def extract_transaction(text: str):
         )
 
     # --------------------------------------------------------
-    # FIRST: LOCAL EXTRACTION
+    # FIRST: deterministic local extraction
     # --------------------------------------------------------
 
     transaction = local_extract_transaction(
@@ -466,19 +566,19 @@ def extract_transaction(text: str):
             flush=True
         )
 
-        # Local extractor does not parse dates.
+        # Date is intentionally None here.
         transaction.transaction_date = None
 
-        # Validate amount
         if transaction.amount is not None:
 
             if transaction.amount <= 0:
+
                 transaction.amount = None
 
         return transaction
 
     # --------------------------------------------------------
-    # SECOND: AI EXTRACTION
+    # SECOND: AI extraction
     # --------------------------------------------------------
 
     print(
@@ -505,6 +605,7 @@ def extract_transaction(text: str):
     if transaction.amount is not None:
 
         if transaction.amount <= 0:
+
             transaction.amount = None
 
     return transaction
