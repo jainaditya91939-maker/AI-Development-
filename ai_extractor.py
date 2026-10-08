@@ -7,10 +7,6 @@ from openai import OpenAI
 from schemas import Transaction
 
 
-# ============================================================
-# ENV / OPENROUTER
-# ============================================================
-
 load_dotenv()
 
 api_key = os.getenv("OPENROUTER_API_KEY")
@@ -59,48 +55,36 @@ def has_explicit_date(text: str) -> bool:
 
 
 # ============================================================
-# ROMAN-HINGLISH NUMBER WORDS
+# ROMAN HINGLISH NUMBER PARSER
 # ============================================================
 
 NUMBER_WORDS = {
-
     "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
 
     "ek": 1,
-    "one": 1,
-
     "do": 2,
-    "two": 2,
-
     "teen": 3,
-    "three": 3,
-
+    "tin": 3,
     "char": 4,
     "chaar": 4,
-    "four": 4,
-
     "paanch": 5,
     "panch": 5,
-    "five": 5,
-
     "che": 6,
     "chhe": 6,
-    "chhah": 6,
-    "six": 6,
-
     "saat": 7,
-    "seven": 7,
-
     "aath": 8,
-    "eight": 8,
-
     "nau": 9,
-    "no": 9,
-    "nine": 9,
-
-    "dus": 10,
     "das": 10,
-    "ten": 10,
 
     "gyarah": 11,
     "barah": 12,
@@ -111,159 +95,136 @@ NUMBER_WORDS = {
     "satrah": 17,
     "atharah": 18,
     "unnis": 19,
-
     "bees": 20,
+
+    "ikkees": 21,
+    "baees": 22,
+    "teis": 23,
+    "chaubees": 24,
+    "pachis": 25,
+    "chabbis": 26,
+    "sattais": 27,
+    "athais": 28,
+    "untis": 29,
     "tees": 30,
-    "chalees": 40,
-    "chaalis": 40,
+
+    "ikattis": 31,
+    "battis": 32,
+    "taintees": 33,
+    "chauntees": 34,
+    "paintis": 35,
+    "chattis": 36,
+    "saintees": 37,
+    "adtees": 38,
+    "untalis": 39,
+    "chalis": 40,
+
+    "iktalis": 41,
+    "bayalis": 42,
+    "taitalis": 43,
+    "chavalis": 44,
+    "paintalis": 45,
+    "chiyalis": 46,
+    "saitalis": 47,
+    "artalis": 48,
+    "unchaas": 49,
     "pachaas": 50,
+
     "saath": 60,
     "sattar": 70,
     "assi": 80,
     "nabbe": 90,
-}
 
+    "hundred": 100,
+    "hundred": 100,
+    "sau": 100,
+    "soo": 100,
 
-# Common speech-recognition forms
-KNOWN_AMOUNTS = {
-
-    "paanso": 500,
-    "paanchso": 500,
-    "panchso": 500,
-
+    "thousand": 1000,
     "hazaar": 1000,
     "hazar": 1000,
-    "thousand": 1000,
-
-    "do hazaar": 2000,
-    "dohazar": 2000,
-
-    "teen hazaar": 3000,
-
-    "chaar hazaar": 4000,
-
-    "paanch hazaar": 5000,
-    "panch hazaar": 5000,
-
-    "das hazaar": 10000,
-    "dus hazaar": 10000,
-
-    "bees hazaar": 20000,
 
     "lakh": 100000,
     "lac": 100000,
+
+    "million": 1000000,
 }
 
 
-def parse_hinglish_number(value: str):
+def parse_word_number(text: str):
 
-    value = value.lower().strip()
-
-    value = re.sub(
-        r"[^a-z\s-]",
-        " ",
-        value,
-    )
-
-    value = re.sub(
-        r"\s+",
-        " ",
-        value,
-    ).strip()
-
-    if not value:
+    if not text:
         return None
 
-    compact = (
+    value = text.lower().strip()
+
+    value = re.sub(
+        r"[,\-]+",
+        " ",
         value
-        .replace(" ", "")
-        .replace("-", "")
     )
 
-    if compact in KNOWN_AMOUNTS:
+    words = value.split()
 
-        return float(
-            KNOWN_AMOUNTS[compact]
-        )
-
-    if value in KNOWN_AMOUNTS:
-
-        return float(
-            KNOWN_AMOUNTS[value]
-        )
-
-    tokens = (
-        value
-        .replace("-", " ")
-        .split()
-    )
+    if not words:
+        return None
 
     total = 0
     current = 0
-    found = False
+    found_number = False
 
-    for token in tokens:
+    for word in words:
 
-        if token in NUMBER_WORDS:
+        if word in NUMBER_WORDS:
 
-            current += NUMBER_WORDS[token]
+            number = NUMBER_WORDS[word]
+            found_number = True
 
-            found = True
+            if number in (100, 1000, 100000, 1000000):
 
-        elif token in {
-            "sau",
-            "hundred",
-        }:
+                if current == 0:
+                    current = 1
 
-            if current == 0:
-                current = 1
+                current *= number
 
-            total += current * 100
+                if number >= 1000:
+                    total += current
+                    current = 0
 
-            current = 0
+            else:
 
-            found = True
-
-        elif token in {
-            "hazaar",
-            "hazar",
-            "thousand",
-        }:
-
-            if current == 0:
-                current = 1
-
-            total += current * 1000
-
-            current = 0
-
-            found = True
-
-        elif token in {
-            "lakh",
-            "lac",
-        }:
-
-            if current == 0:
-                current = 1
-
-            total += current * 100000
-
-            current = 0
-
-            found = True
+                current += number
 
         else:
 
+            # Ignore common amount words
+            if word in {
+                "rupee",
+                "rupees",
+                "rupay",
+                "rupaye",
+                "rs",
+                "rs.",
+                "ka",
+                "ki",
+                "ke",
+                "only",
+                "and",
+                "aur",
+            }:
+                continue
+
+            # Unknown word means this probably isn't
+            # a pure number phrase.
             return None
 
-    if not found:
+    if not found_number:
         return None
 
     result = total + current
 
     if result > 0:
-        return float(result)
+        return result
 
     return None
 
@@ -274,177 +235,149 @@ def parse_hinglish_number(value: str):
 
 def extract_amount(text: str):
 
-    # ----------------------------------------
-    # NORMAL NUMERIC AMOUNTS
-    # ----------------------------------------
+    if not text:
+        return None
 
-    numeric_patterns = [
+    # --------------------------------------------------------
+    # 1. Numeric amounts
+    # --------------------------------------------------------
 
+    patterns = [
+
+        # ₹500
         r"₹\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)",
 
-        r"(?:rs\.?|rupees?)\s*"
-        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)",
+        # rs 500 / rs. 500
+        r"(?:rs\.?)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)",
 
-        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)"
-        r"\s*rupees?",
+        # 500 rupees / 500 rupee
+        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?",
 
-        r"(?:₹\s*)?"
-        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)"
-        r"\s*(?:ka|ki|ke)\b",
+        # 500 rupay / 500 rupaye / 500 rupia
+        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:rupay|rupaye|rupiya|rupiah)",
+
+        # 500 ka / 500 ki / 500 ke
+        r"(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:ka|ki|ke)(?=\s|$|[.,!?])",
+
+        # 500
+        # Only use standalone numbers when they are close to
+        # transaction words, avoiding dates.
+        r"\b([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\b",
     ]
 
-    for pattern in numeric_patterns:
+    for pattern in patterns:
 
-        match = re.search(
+        matches = re.finditer(
             pattern,
             text,
-            re.IGNORECASE,
+            re.IGNORECASE
         )
 
-        if not match:
-            continue
+        for match in matches:
 
-        try:
-
-            amount = float(
-                match.group(1)
-                .replace(",", "")
+            value = match.group(1).replace(
+                ",",
+                ""
             )
 
-            if amount > 0:
-                return amount
+            try:
 
-        except ValueError:
+                amount = float(value)
 
-            pass
+                # Ignore obviously date-like values
+                if amount >= 100000000:
+                    continue
 
+                if amount > 0:
+                    return amount
 
-    # ----------------------------------------
-    # ROMAN-HINGLISH SPOKEN AMOUNTS
-    # ----------------------------------------
+            except ValueError:
+                continue
 
-    value = text.lower().strip()
+    # --------------------------------------------------------
+    # 2. Roman Hinglish word amounts
+    # --------------------------------------------------------
 
-    value = re.sub(
-        r"[,.!?]",
-        " ",
-        value,
-    )
+    normalized_text = text.lower()
 
-    value = re.sub(
-        r"\s+",
-        " ",
-        value,
-    ).strip()
+    # Look for phrases around common amount words.
+    word_patterns = [
 
+        r"\b([a-z]+(?:\s+[a-z]+){0,5})\s+(?:rupee|rupees|rupay|rupaye|rupiya|rupiah)\b",
 
-    # ----------------------------------------
-    # EXACT COMMON AMOUNTS
-    # ----------------------------------------
+        r"\b([a-z]+(?:\s+[a-z]+){0,5})\s+(?:ka|ki|ke)\b",
+    ]
 
-    for phrase, amount in sorted(
-        KNOWN_AMOUNTS.items(),
-        key=lambda item: len(item[0]),
-        reverse=True,
-    ):
+    for pattern in word_patterns:
+
+        matches = re.finditer(
+            pattern,
+            normalized_text,
+            re.IGNORECASE
+        )
+
+        for match in matches:
+
+            phrase = match.group(1).strip()
+
+            # Don't accidentally parse supplier name.
+            result = parse_word_number(phrase)
+
+            if result is not None and result > 0:
+                return float(result)
+
+    # --------------------------------------------------------
+    # 3. Specific common Hinglish amount phrases
+    # --------------------------------------------------------
+
+    common_amounts = {
+
+        "ek sau": 100,
+        "do sau": 200,
+        "teen sau": 300,
+        "teen soo": 300,
+        "tin sau": 300,
+        "tin soo": 300,
+
+        "char sau": 400,
+        "chaar sau": 400,
+
+        "paanch sau": 500,
+        "panch sau": 500,
+
+        "che sau": 600,
+        "chhe sau": 600,
+
+        "saat sau": 700,
+
+        "aath sau": 800,
+
+        "nau sau": 900,
+
+        "ek hazaar": 1000,
+        "ek hajar": 1000,
+        "do hazaar": 2000,
+        "do hajar": 2000,
+        "teen hazaar": 3000,
+        "teen hajar": 3000,
+        "chaar hazaar": 4000,
+        "paanch hazaar": 5000,
+        "das hazaar": 10000,
+
+        "bees hazaar": 20000,
+        "pachaas hazaar": 50000,
+        "ek lakh": 100000,
+    }
+
+    for phrase, amount in common_amounts.items():
 
         if re.search(
-            rf"\b{re.escape(phrase)}\b",
-            value,
-            re.IGNORECASE,
+            r"\b"
+            + re.escape(phrase)
+            + r"\b",
+            normalized_text
         ):
-
             return float(amount)
-
-
-    # ----------------------------------------
-    # "paanch sau rupee"
-    # "do hazaar rupees"
-    # "paanch hazaar ka"
-    # ----------------------------------------
-
-    word_pattern = (
-
-        r"\b("
-
-        r"(?:"
-        r"zero|ek|one|do|two|teen|three|"
-        r"char|chaar|four|paanch|panch|five|"
-        r"che|chhe|chhah|six|saat|seven|"
-        r"aath|eight|nau|no|nine|dus|das|"
-        r"ten|gyarah|barah|terah|chaudah|"
-        r"pandrah|solah|satrah|atharah|"
-        r"unnis|bees|tees|chalees|chaalis|"
-        r"pachaas|saath|sattar|assi|nabbe|"
-        r"sau|hundred|hazaar|hazar|thousand|"
-        r"lakh|lac"
-        r")"
-
-        r"(?:[- ]+"
-
-        r"(?:"
-        r"zero|ek|one|do|two|teen|three|"
-        r"char|chaar|four|paanch|panch|five|"
-        r"che|chhe|chhah|six|saat|seven|"
-        r"aath|eight|nau|no|nine|dus|das|"
-        r"ten|gyarah|barah|terah|chaudah|"
-        r"pandrah|solah|satrah|atharah|"
-        r"unnis|bees|tees|chalees|chaalis|"
-        r"pachaas|saath|sattar|assi|nabbe|"
-        r"sau|hundred|hazaar|hazar|thousand|"
-        r"lakh|lac"
-        r")"
-
-        r")*"
-
-        r")\s+"
-
-        r"(?:"
-        r"rupees?|rupaye|rupay|rs\.?|ka|ki|ke"
-        r")\b"
-    )
-
-
-    match = re.search(
-        word_pattern,
-        value,
-        re.IGNORECASE,
-    )
-
-    if match:
-
-        amount = parse_hinglish_number(
-            match.group(1)
-        )
-
-        if amount is not None:
-            return amount
-
-
-    # ----------------------------------------
-    # SPOKEN AMOUNT WITHOUT "RUPEES"
-    # Example:
-    # "paanch sau ka purchase"
-    # ----------------------------------------
-
-    words = re.findall(
-        r"\b[a-z]+(?:[- ][a-z]+){0,4}\b",
-        value,
-    )
-
-    for phrase in words:
-
-        amount = parse_hinglish_number(
-            phrase
-        )
-
-        if (
-            amount is not None
-            and amount >= 100
-        ):
-
-            return amount
-
 
     return None
 
@@ -457,130 +390,73 @@ def extract_transaction_type(text: str):
 
     value = text.lower().strip()
 
-
-    # ----------------------------------------
-    # CREDIT NOTE
-    # ----------------------------------------
-
+    # Credit note FIRST
     credit_words = [
-
         "credit note",
-
         "credit_note",
-
         "credit",
-
     ]
 
     for word in credit_words:
 
         if word in value:
-
             return "CREDIT_NOTE"
 
-
-    # ----------------------------------------
-    # RETURN
-    # ----------------------------------------
-
+    # Return
     return_words = [
-
         "return",
-
         "returned",
-
         "return hua",
-
         "return hui",
-
         "return ki",
-
         "return kiya",
-
     ]
 
     for word in return_words:
 
         if word in value:
-
             return "RETURN"
 
-
-    # ----------------------------------------
-    # PAYMENT
-    # ----------------------------------------
-
+    # Payment
     payment_words = [
-
         "payment",
-
         "paid",
-
         "pay",
-
         "payment ki",
-
         "payment hua",
-
         "payment kiya",
-
         "pay kiya",
-
         "payment kar",
-
     ]
 
     for word in payment_words:
 
         if word in value:
-
             return "PAYMENT"
 
-
-    # ----------------------------------------
-    # PURCHASE
-    # ----------------------------------------
-
+    # Purchase
     purchase_words = [
-
         "purchase",
-
         "purchased",
-
         "buy",
-
         "bought",
-
         "purchase hua",
-
         "purchase hui",
-
         "purchase ki",
-
         "purchase kiya",
-
         "purchase kar",
-
         "maal liya",
-
         "maal liya hai",
-
         "samaan liya",
-
         "saman liya",
-
         "samaan kharida",
-
         "saman kharida",
-
     ]
 
     for word in purchase_words:
 
         if word in value:
-
             return "PURCHASE"
-
 
     return None
 
@@ -596,124 +472,44 @@ def extract_supplier_name(text: str):
 
     value = text.strip()
 
-
-    # ----------------------------------------
-    # IMPORTANT:
-    #
-    # Check supplier + "se/from/to/ko"
-    # BEFORE transaction-at-start patterns.
-    #
-    # Example:
-    # Haldiram se paanso rupee ka purchase kiya
-    #
-    # Supplier must be:
-    # Haldiram
-    # ----------------------------------------
-
-    relation_match = re.search(
-        r"^(.+?)\s+(?:se|from|to|ko)\b",
-        value,
-        re.IGNORECASE,
-    )
-
-
-    if relation_match:
-
-        supplier = (
-            relation_match
-            .group(1)
-            .strip(" ,.-")
-        )
-
-        relation_prefix = supplier.lower()
-
-
-        # Do not treat:
-        # "purchase 2000"
-        # as supplier.
-        transaction_prefix_words = (
-
-            "purchase ",
-
-            "purchased ",
-
-            "buy ",
-
-            "bought ",
-
-            "payment ",
-
-            "paid ",
-
-            "pay ",
-
-            "return ",
-
-            "returned ",
-
-            "credit ",
-
-        )
-
-
-        if (
-            supplier
-            and not relation_prefix.startswith(
-                transaction_prefix_words
-            )
-        ):
-
-            return supplier
-
-
-    # ----------------------------------------
-    # OTHER SUPPLIER PATTERNS
-    # ----------------------------------------
-
     patterns = [
 
-        # purchase/payment/return FROM supplier
-        r"(?:purchase|purchased|buy|bought|"
-        r"payment|paid|pay|return|returned|"
-        r"credit(?:\s+note)?)\b"
-        r".*?\bfrom\s+"
-        r"(.+?)(?:\s+(?:for|of)\b|$)",
+        # Havells purchase 2000
+        r"^(.+?)\s+(?:purchase|purchased|buy|bought)\b",
 
+        # Havells payment 500
+        r"^(.+?)\s+(?:payment|paid|pay)\b",
 
-        # Supplier ka ... return/payment/purchase
-        r"^(.+?)\s+ka\b.*?\b"
-        r"(?:purchase|purchased|buy|bought|"
-        r"payment|paid|pay|return|returned|"
-        r"credit(?:\s+note)?)\b",
+        # Havells return 1000
+        r"^(.+?)\s+(?:return|returned)\b",
 
-
-        # Supplier purchase
-        r"^(.+?)\s+"
-        r"(?:purchase|purchased|buy|bought)\b",
-
-
-        # Supplier payment
-        r"^(.+?)\s+"
-        r"(?:payment|paid|pay)\b",
-
-
-        # Supplier return
-        r"^(.+?)\s+"
-        r"(?:return|returned)\b",
-
-
-        # Supplier credit note
+        # Havells credit note 300
         r"^(.+?)\s+credit\s+note\b",
 
+        # Havells 500 purchase
+        r"^(.+?)\s+(?:₹|rs\.?|rupees?|rupay|rupaye)\s*[0-9][0-9,]*(?:\.[0-9]+)?\s+(?:purchase|payment|return|credit)\b",
 
-        # Supplier 500 purchase
-        r"^(.+?)\s+"
-        r"(?:₹|rs\.?|rupees?)\s*"
-        r"[0-9][0-9,]*(?:\.[0-9]+)?\s+"
-        r"(?:purchase|payment|return|credit)\b",
+        # Havells se 500
+        r"^(.+?)\s+se\s+(?:₹|rs\.?|rupees?|rupay|rupaye|[0-9])",
 
+        # Havells from 500
+        r"^(.+?)\s+from\s+(?:₹|rs\.?|rupees?|rupay|rupaye|[0-9])",
+
+        # Havells se purchase
+        r"^(.+?)\s+se\s+(?:purchase|purchased|payment|paid|return|returned|credit)\b",
+
+        # Havells ko 500
+        r"^(.+?)\s+ko\s+(?:₹|rs\.?|rupees?|rupay|rupaye|[0-9])",
+
+        # Havells ko payment
+        r"^(.+?)\s+ko\s+(?:payment|paid|pay)\b",
+
+        # purchase from Havells
+        r"(?:purchase|purchased|buy|bought|payment|paid|pay|return|returned|credit(?:\s+note)?)\b.*?\bfrom\s+(.+?)(?:\s+(?:for|of)\b|$)",
+
+        # purchase from Havells
+        r"(?:purchase|purchased|buy|bought|payment|paid|pay|return|returned|credit(?:\s+note)?)\b.*?\bfrom\s+(.+)$",
     ]
-
 
     for pattern in patterns:
 
@@ -726,13 +522,9 @@ def extract_supplier_name(text: str):
         if not match:
             continue
 
-
-        supplier = (
-            match
-            .group(1)
-            .strip(" ,.-")
+        supplier = match.group(1).strip(
+            " ,.-"
         )
-
 
         supplier = re.sub(
             r"^(from|to|supplier)\s+",
@@ -741,40 +533,23 @@ def extract_supplier_name(text: str):
             flags=re.IGNORECASE,
         ).strip(" ,.-")
 
-
         if supplier.lower() in {
-
             "purchase",
-
             "purchased",
-
             "buy",
-
             "bought",
-
             "payment",
-
             "paid",
-
             "pay",
-
             "return",
-
             "returned",
-
             "credit",
-
             "credit note",
-
         }:
-
             continue
 
-
         if supplier:
-
             return supplier
-
 
     return None
 
@@ -787,81 +562,51 @@ def local_extract_transaction(text: str):
 
     amount = extract_amount(text)
 
-    transaction_type = (
-        extract_transaction_type(text)
+    transaction_type = extract_transaction_type(
+        text
     )
 
-    supplier_name = (
-        extract_supplier_name(text)
+    supplier_name = extract_supplier_name(
+        text
     )
-
 
     print(
         "LOCAL EXTRACT:",
         {
-            "transaction_type":
-                transaction_type,
-
-            "supplier_name":
-                supplier_name,
-
-            "amount":
-                amount,
+            "transaction_type": transaction_type,
+            "supplier_name": supplier_name,
+            "amount": amount,
         },
         flush=True,
     )
 
-
-    # If transaction type is unknown,
-    # use AI fallback.
-    #
-    # If supplier or amount is missing,
-    # still return the transaction.
-    # processor.py will ask for missing
-    # information.
-
+    # We can safely return a transaction even when
+    # supplier or amount is missing.
+    # Processor will ask for information.
     if transaction_type is None:
-
         return None
 
-
     return Transaction(
-
-        transaction_type=
-            transaction_type,
-
-        supplier_name=
-            supplier_name,
-
-        amount=
-            amount,
-
-        payment_status=
-            None,
-
-        transaction_date=
-            None,
-
-        reference_number=
-            None,
-
-        notes=
-            None,
+        transaction_type=transaction_type,
+        supplier_name=supplier_name,
+        amount=amount,
+        payment_status=None,
+        transaction_date=None,
+        reference_number=None,
+        notes=None,
     )
 
 
 # ============================================================
-# AI EXTRACTION FALLBACK
+# AI EXTRACTION
 # ============================================================
 
-def ai_extract_transaction(text: str):
+def ai_extract_transaction(text: str) -> Transaction:
 
     if client is None:
-
         raise ValueError(
             "AI extraction service is not configured"
         )
-
 
     prompt = f"""
 Extract transaction information from this user message.
@@ -890,39 +635,47 @@ Required JSON structure:
 Rules:
 
 1. Understand English and Roman Hinglish only.
-
 2. Do not require Devanagari Hindi.
-
 3. Extract supplier name if explicitly mentioned.
-
 4. Extract amount if explicitly mentioned.
-
-5. Amount must be greater than zero.
-
-6. If amount is explicitly negative,
-   return amount null.
-
-7. Extract date ONLY if explicitly mentioned.
-
-8. Convert dates to YYYY-MM-DD.
-
-9. Never assume today's date.
-
-10. Never invent missing information.
-
-11. Use null for missing fields.
-
-12. Do not calculate balances.
-
-13. Do not modify any database.
+5. Understand numeric amounts such as 500, 1000, 2500.
+6. Understand Roman Hinglish amounts such as:
+   - teen sau = 300
+   - teen soo = 300
+   - paanch sau = 500
+   - paanch sau = 500
+   - do hazaar = 2000
+   - ek hazaar = 1000
+   - ek lakh = 100000
+7. Amount must be greater than zero.
+8. If amount is explicitly negative, return amount null.
+9. Extract date ONLY if explicitly mentioned.
+10. Convert dates to YYYY-MM-DD.
+11. Never assume today's date.
+12. Never invent missing information.
+13. Use null for missing fields.
+14. Do not calculate balances.
+15. Do not modify any database.
 
 Examples:
 
 "Havells se 500 ka maal liya"
 => PURCHASE, Havells, 500
 
-"Havells se 500 ka payment kiya"
+"Havells se 500 rupay ka payment kiya"
 => PAYMENT, Havells, 500
+
+"Havells se teen sau rupay ka purchase kiya"
+=> PURCHASE, Havells, 300
+
+"Havells se teen soo rupay ka purchase kiya"
+=> PURCHASE, Havells, 300
+
+"Havells se paanch sau rupaye ka maal liya"
+=> PURCHASE, Havells, 500
+
+"Havells se do hazaar rupay ka purchase kiya"
+=> PURCHASE, Havells, 2000
 
 "Havells ka 500 ka maal return kiya"
 => RETURN, Havells, 500
@@ -935,31 +688,21 @@ User message:
 {text}
 """
 
-
     try:
 
-        response = (
-            client.chat.completions.create(
-
-                model="openrouter/free",
-
-                max_tokens=180,
-
-                messages=[
-
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-
-                ],
-
-                response_format={
-                    "type": "json_object"
-                },
-            )
+        response = client.chat.completions.create(
+            model="openrouter/free",
+            max_tokens=180,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            response_format={
+                "type": "json_object"
+            },
         )
-
 
     except Exception as e:
 
@@ -969,17 +712,11 @@ User message:
             flush=True,
         )
 
-
         raise ValueError(
-
             "AI extraction is temporarily unavailable. "
-
-            "Please use a clear English/Roman Hinglish "
-            "voice command with supplier, amount "
-            "and transaction type."
-
+            "Please use a clear English/Roman Hinglish voice command "
+            "with supplier, amount and transaction type."
         )
-
 
     if not response.choices:
 
@@ -987,14 +724,7 @@ User message:
             "AI extractor returned no choices"
         )
 
-
-    data = (
-        response
-        .choices[0]
-        .message
-        .content
-    )
-
+    data = response.choices[0].message.content
 
     if not data:
 
@@ -1002,21 +732,17 @@ User message:
             "AI extractor returned empty response"
         )
 
-
     print(
         "AI TRANSACTION RAW:",
         repr(data),
         flush=True,
     )
 
-
     try:
 
-        transaction = (
-            Transaction
-            .model_validate_json(data)
+        transaction = Transaction.model_validate_json(
+            data
         )
-
 
     except Exception as e:
 
@@ -1026,12 +752,9 @@ User message:
             flush=True,
         )
 
-
         raise ValueError(
-            "AI extractor returned "
-            "invalid transaction data."
+            "AI extractor returned invalid transaction data."
         )
-
 
     return transaction
 
@@ -1048,9 +771,7 @@ def extract_transaction(text: str):
             "Transaction text must be text"
         )
 
-
     text = text.strip()
-
 
     if not text:
 
@@ -1058,16 +779,13 @@ def extract_transaction(text: str):
             "Transaction text cannot be empty"
         )
 
+    # --------------------------------------------------------
+    # FIRST: deterministic local extraction
+    # --------------------------------------------------------
 
-    # ========================================================
-    # FIRST:
-    # DETERMINISTIC LOCAL EXTRACTION
-    # ========================================================
-
-    transaction = (
-        local_extract_transaction(text)
+    transaction = local_extract_transaction(
+        text
     )
-
 
     if transaction is not None:
 
@@ -1076,51 +794,36 @@ def extract_transaction(text: str):
             flush=True,
         )
 
-
-        # We only use an explicit date
-        # when one is actually provided.
+        # Date should only be accepted if explicitly mentioned.
         transaction.transaction_date = None
-
 
         if transaction.amount is not None:
 
             if transaction.amount <= 0:
-
                 transaction.amount = None
-
 
         return transaction
 
-
-    # ========================================================
-    # SECOND:
-    # AI FALLBACK
-    #
-    # Only used when local extraction cannot
-    # identify the transaction type.
-    # ========================================================
+    # --------------------------------------------------------
+    # SECOND: AI extraction
+    # --------------------------------------------------------
 
     print(
         "FALLING BACK TO AI TRANSACTION EXTRACTION",
         flush=True,
     )
 
-
-    transaction = (
-        ai_extract_transaction(text)
+    transaction = ai_extract_transaction(
+        text
     )
-
 
     if not has_explicit_date(text):
 
         transaction.transaction_date = None
 
-
     if transaction.amount is not None:
 
         if transaction.amount <= 0:
-
             transaction.amount = None
-
 
     return transaction
