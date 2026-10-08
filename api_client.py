@@ -1,476 +1,598 @@
 import os
 import re
-from datetime import date
-
-from dotenv import load_dotenv
-from openai import OpenAI
-from schemas import Transaction
+import requests
+from difflib import SequenceMatcher
 
 
-load_dotenv()
+BACKEND_URL = os.getenv(
+    "BACKEND_URL",
+    "http://127.0.0.1:8000"
+)
 
-api_key = os.getenv("OPENROUTER_API_KEY")
 
-client = None
+# ============================================================
+# AUTHENTICATION
+# ============================================================
 
-if api_key:
-    client = OpenAI(
-        api_key=api_key,
-        base_url="https://openrouter.ai/api/v1",
+def _headers(token: str):
+    if not token:
+        raise ValueError("Authentication token is required")
+
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+
+# ============================================================
+# SUPPLIERS API
+# ============================================================
+
+def get_suppliers(token: str):
+
+    response = requests.get(
+        f"{BACKEND_URL}/api/v1/suppliers",
+        headers=_headers(token),
+        timeout=20
     )
 
+    response.raise_for_status()
+
+    data = response.json()
+
+    if not isinstance(data, list):
+        return []
+
+    return data
+
+
+def get_supplier_summary(token: str):
+
+    response = requests.get(
+        f"{BACKEND_URL}/api/v1/suppliers/summary",
+        headers=_headers(token),
+        timeout=20
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+def get_supplier_ledger(
+    supplier_id: int,
+    token: str
+):
+
+    response = requests.get(
+        f"{BACKEND_URL}/api/v1/suppliers/{supplier_id}/ledger",
+        headers=_headers(token),
+        timeout=20
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
 
 # ============================================================
-# DATE DETECTION
+# SUPPLIER NAME NORMALIZATION
+# ENGLISH + ROMAN HINGLISH ONLY
 # ============================================================
 
-def has_explicit_date(text: str) -> bool:
-    pattern = re.compile(
-        r"""
-        (
-            \b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}\b
-            |
-            \b\d{1,2}\s+
-            (?:
-                january|february|march|april|may|june|
-                july|august|september|october|november|december|
-                jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec
-            )
-            \s+\d{4}\b
-            |
-            \b
-            (?:
-                january|february|march|april|may|june|
-                july|august|september|october|november|december|
-                jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
-            )
-            \s+\d{1,2},?\s+\d{4}\b
+def normalize_supplier_name(name: str) -> str:
+
+    if not name:
+        return ""
+
+    value = str(name).lower().strip()
+
+    # Common speech-recognition variations
+    replacements = {
+        "havel": "havells",
+        "havell": "havells",
+        "havels": "havells",
+        "havells": "havells",
+
+        "poly cab": "polycab",
+        "polycab": "polycab",
+
+        "finolex": "finolex",
+
+        "anchor": "anchor",
+
+        "philips": "philips",
+
+        "orient": "orient",
+
+        "bajaj": "bajaj",
+
+        "usha": "usha",
+
+        "crompton": "crompton",
+
+        "wipro": "wipro"
+    }
+
+    value = replacements.get(value, value)
+
+    # Remove anything except English letters,
+    # numbers, spaces, dot, &, and hyphen.
+    value = re.sub(
+        r"[^a-z0-9\s.&-]",
+        " ",
+        value
+    )
+
+    # Remove common company suffixes
+    value = re.sub(
+        r"\b(private limited|pvt ltd|pvt\. ltd\.|private ltd|limited|ltd|llp|incorporated|inc)\b",
+        " ",
+        value
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    ).strip()
+
+    return value
+
+
+# ============================================================
+# TOKENIZATION
+# ============================================================
+
+def supplier_tokens(name: str):
+
+    normalized = normalize_supplier_name(name)
+
+    if not normalized:
+        return set()
+
+    return set(normalized.split())
+
+
+# ============================================================
+# SUPPLIER SIMILARITY
+# ============================================================
+
+def supplier_similarity(
+    name1: str,
+    name2: str
+) -> float:
+
+    a = normalize_supplier_name(name1)
+    b = normalize_supplier_name(name2)
+
+    if not a or not b:
+        return 0.0
+
+    if a == b:
+        return 1.0
+
+    a_tokens = supplier_tokens(name1)
+    b_tokens = supplier_tokens(name2)
+
+    if not a_tokens or not b_tokens:
+        return 0.0
+
+    common_tokens = a_tokens.intersection(
+        b_tokens
+    )
+
+    if common_tokens:
+
+        smaller_count = min(
+            len(a_tokens),
+            len(b_tokens)
         )
-        """,
-        re.IGNORECASE | re.VERBOSE,
+
+        containment_score = (
+            len(common_tokens)
+            / smaller_count
+        )
+
+        if containment_score == 1.0:
+            return 0.96
+
+        token_overlap_score = (
+            2 * len(common_tokens)
+            / (len(a_tokens) + len(b_tokens))
+        )
+
+    else:
+        token_overlap_score = 0.0
+
+    direct_score = SequenceMatcher(
+        None,
+        a,
+        b
+    ).ratio()
+
+    token_scores = []
+
+    for token_a in a_tokens:
+
+        best_token_score = 0.0
+
+        for token_b in b_tokens:
+
+            score = SequenceMatcher(
+                None,
+                token_a,
+                token_b
+            ).ratio()
+
+            best_token_score = max(
+                best_token_score,
+                score
+            )
+
+        token_scores.append(
+            best_token_score
+        )
+
+    if token_scores:
+
+        token_similarity_score = (
+            sum(token_scores)
+            / len(token_scores)
+        )
+
+    else:
+
+        token_similarity_score = 0.0
+
+    return max(
+        direct_score,
+        token_overlap_score,
+        token_similarity_score
     )
 
-    return bool(pattern.search(text))
-
 
 # ============================================================
-# AMOUNT EXTRACTION
+# FIND SUPPLIER
 # ============================================================
 
-def extract_amount(text: str):
-    patterns = [
-        r"₹\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)",
-        r"(?:rs\.?|rupees?)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)",
-        r"([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*rupees?",
-        r"(?:₹\s*)?([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:ka|ki|ke)(?=\s|$|[.,!?])",
-    ]
+def find_supplier(
+    supplier_name: str,
+    suppliers
+):
 
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-
-        if not match:
-            continue
-
-        value = match.group(1).replace(",", "")
-
-        try:
-            amount = float(value)
-
-            if amount > 0:
-                return amount
-
-        except ValueError:
-            pass
-
-    return None
-
-
-# ============================================================
-# TRANSACTION TYPE
-# ============================================================
-
-def extract_transaction_type(text: str):
-    value = text.lower().strip()
-
-    # Credit note FIRST
-    credit_words = [
-        "credit note",
-        "credit_note",
-        "credit",
-    ]
-
-    for word in credit_words:
-        if word in value:
-            return "CREDIT_NOTE"
-
-    # Return
-    return_words = [
-        "return",
-        "returned",
-        "return hua",
-        "return hui",
-        "return ki",
-        "return kiya",
-    ]
-
-    for word in return_words:
-        if word in value:
-            return "RETURN"
-
-    # Payment
-    payment_words = [
-        "payment",
-        "paid",
-        "pay",
-        "payment ki",
-        "payment hua",
-        "payment kiya",
-        "pay kiya",
-        "payment kar",
-    ]
-
-    for word in payment_words:
-        if word in value:
-            return "PAYMENT"
-
-    # Purchase
-    purchase_words = [
-        "purchase",
-        "purchased",
-        "buy",
-        "bought",
-        "purchase hua",
-        "purchase hui",
-        "purchase ki",
-        "purchase kiya",
-        "purchase kar",
-        "maal liya",
-        "maal liya hai",
-        "samaan liya",
-        "saman liya",
-        "samaan kharida",
-        "saman kharida",
-    ]
-
-    for word in purchase_words:
-        if word in value:
-            return "PURCHASE"
-
-    return None
-
-
-# ============================================================
-# SUPPLIER NAME
-# ============================================================
-
-def extract_supplier_name(text: str):
-    if not text:
+    if not supplier_name:
         return None
 
-    value = text.strip()
+    requested = str(
+        supplier_name
+    ).strip()
 
-    patterns = [
-        # Havells purchase 2000
-        r"^(.+?)\s+(?:purchase|purchased|buy|bought)\b",
+    if not requested:
+        return None
 
-        # Havells payment 500
-        r"^(.+?)\s+(?:payment|paid|pay)\b",
+    # --------------------------------------------------------
+    # 1. Exact match
+    # --------------------------------------------------------
 
-        # Havells return 1000
-        r"^(.+?)\s+(?:return|returned)\b",
+    for supplier in suppliers:
 
-        # Havells credit note 300
-        r"^(.+?)\s+credit\s+note\b",
+        db_name = str(
+            supplier.get("name", "")
+        ).strip()
 
-        # Havells 500 purchase
-        r"^(.+?)\s+(?:₹|rs\.?|rupees?)\s*[0-9][0-9,]*(?:\.[0-9]+)?\s+(?:purchase|payment|return|credit)\b",
-
-        # Havells se 500
-        r"^(.+?)\s+se\s+(?:₹|rs\.?|rupees?|[0-9])",
-
-        # Havells from 500
-        r"^(.+?)\s+from\s+(?:₹|rs\.?|rupees?|[0-9])",
-
-        # Havells se purchase
-        r"^(.+?)\s+se\s+(?:purchase|purchased|payment|paid|return|returned|credit)\b",
-
-        # Havells ko 500
-        r"^(.+?)\s+ko\s+(?:₹|rs\.?|rupees?|[0-9])",
-
-        # Havells ko payment
-        r"^(.+?)\s+ko\s+(?:payment|paid|pay)\b",
-
-        # purchase 2000 from Havells
-        r"(?:purchase|purchased|buy|bought|payment|paid|pay|return|returned|credit(?:\s+note)?)\b.*?\bfrom\s+(.+?)(?:\s+(?:for|of)\b|$)",
-
-        # purchase from Havells
-        r"(?:purchase|purchased|buy|bought|payment|paid|pay|return|returned|credit(?:\s+note)?)\b.*?\bfrom\s+(.+)$",
-    ]
-
-    for pattern in patterns:
-        match = re.search(
-            pattern,
-            value,
-            re.IGNORECASE,
-        )
-
-        if not match:
-            continue
-
-        supplier = match.group(1).strip(" ,.-")
-
-        supplier = re.sub(
-            r"^(from|to|supplier)\s+",
-            "",
-            supplier,
-            flags=re.IGNORECASE,
-        ).strip(" ,.-")
-
-        if supplier.lower() in {
-            "purchase",
-            "purchased",
-            "buy",
-            "bought",
-            "payment",
-            "paid",
-            "pay",
-            "return",
-            "returned",
-            "credit",
-            "credit note",
-        }:
-            continue
-
-        if supplier:
+        if db_name.lower() == requested.lower():
             return supplier
 
+    # --------------------------------------------------------
+    # 2. Normalized exact match
+    # --------------------------------------------------------
+
+    requested_normalized = (
+        normalize_supplier_name(
+            requested
+        )
+    )
+
+    for supplier in suppliers:
+
+        db_name = str(
+            supplier.get("name", "")
+        )
+
+        db_normalized = (
+            normalize_supplier_name(
+                db_name
+            )
+        )
+
+        if (
+            requested_normalized
+            and
+            requested_normalized == db_normalized
+        ):
+            return supplier
+
+    # --------------------------------------------------------
+    # 3. Token containment
+    # --------------------------------------------------------
+
+    requested_tokens = supplier_tokens(
+        requested
+    )
+
+    containment_matches = []
+
+    for supplier in suppliers:
+
+        db_name = str(
+            supplier.get("name", "")
+        )
+
+        db_tokens = supplier_tokens(
+            db_name
+        )
+
+        if not requested_tokens or not db_tokens:
+            continue
+
+        common_tokens = (
+            requested_tokens.intersection(
+                db_tokens
+            )
+        )
+
+        if not common_tokens:
+            continue
+
+        smaller_count = min(
+            len(requested_tokens),
+            len(db_tokens)
+        )
+
+        containment = (
+            len(common_tokens)
+            / smaller_count
+        )
+
+        if containment == 1.0:
+
+            containment_matches.append(
+                supplier
+            )
+
+    if len(containment_matches) == 1:
+        return containment_matches[0]
+
+    # --------------------------------------------------------
+    # 4. Fuzzy matching
+    # --------------------------------------------------------
+
+    matches = []
+
+    for supplier in suppliers:
+
+        db_name = str(
+            supplier.get("name", "")
+        )
+
+        score = supplier_similarity(
+            requested,
+            db_name
+        )
+
+        matches.append(
+            (
+                score,
+                supplier
+            )
+        )
+
+    if not matches:
+        return None
+
+    matches.sort(
+        key=lambda item: item[0],
+        reverse=True
+    )
+
+    best_score, best_supplier = (
+        matches[0]
+    )
+
+    # Ambiguity protection
+    if len(matches) > 1:
+
+        second_score = matches[1][0]
+
+        if (
+            best_score < 0.90
+            and
+            (best_score - second_score) < 0.08
+        ):
+            return None
+
+    if best_score >= 0.78:
+        return best_supplier
+
     return None
 
 
 # ============================================================
-# LOCAL EXTRACTION
+# SEND TRANSACTION
 # ============================================================
 
-def local_extract_transaction(text: str):
-
-    amount = extract_amount(text)
-    transaction_type = extract_transaction_type(text)
-    supplier_name = extract_supplier_name(text)
+def send_transaction(
+    transaction,
+    token: str
+):
 
     print(
-        "LOCAL EXTRACT:",
-        {
-            "transaction_type": transaction_type,
-            "supplier_name": supplier_name,
-            "amount": amount,
-        },
-        flush=True,
+        "AI TRANSACTION SUPPLIER:",
+        transaction.supplier_name,
+        flush=True
     )
 
-    # We can safely return a transaction even when supplier
-    # or amount is missing. Processor will ask for information.
-    if transaction_type is None:
-        return None
+    # --------------------------------------------------------
+    # Get suppliers using the SAME JWT.
+    # Backend therefore returns only the current
+    # user's business suppliers.
+    # --------------------------------------------------------
 
-    return Transaction(
-        transaction_type=transaction_type,
-        supplier_name=supplier_name,
-        amount=amount,
-        payment_status=None,
-        transaction_date=None,
-        reference_number=None,
-        notes=None,
+    suppliers = get_suppliers(
+        token
     )
-
-
-# ============================================================
-# AI EXTRACTION
-# ============================================================
-
-def ai_extract_transaction(text: str) -> Transaction:
-
-    if client is None:
-        raise ValueError(
-            "AI extraction service is not configured"
-        )
-
-    prompt = f"""
-Extract transaction information from this user message.
-
-Allowed transaction types:
-
-PURCHASE
-PAYMENT
-RETURN
-CREDIT_NOTE
-
-Return ONLY valid JSON.
-
-Required JSON structure:
-
-{{
-    "transaction_type": null,
-    "supplier_name": null,
-    "amount": null,
-    "payment_status": null,
-    "transaction_date": null,
-    "reference_number": null,
-    "notes": null
-}}
-
-Rules:
-
-1. Understand English and Roman Hinglish only.
-2. Do not require Devanagari Hindi.
-3. Extract supplier name if explicitly mentioned.
-4. Extract amount if explicitly mentioned.
-5. Amount must be greater than zero.
-6. If amount is explicitly negative, return amount null.
-7. Extract date ONLY if explicitly mentioned.
-8. Convert dates to YYYY-MM-DD.
-9. Never assume today's date.
-10. Never invent missing information.
-11. Use null for missing fields.
-12. Do not calculate balances.
-13. Do not modify any database.
-
-Examples:
-
-"Havells se 500 ka maal liya"
-=> PURCHASE, Havells, 500
-
-"Havells se 500 ka payment kiya"
-=> PAYMENT, Havells, 500
-
-"Havells ka 500 ka maal return kiya"
-=> RETURN, Havells, 500
-
-"Havells ka 500 ka credit note"
-=> CREDIT_NOTE, Havells, 500
-
-User message:
-
-{text}
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="openrouter/free",
-            max_tokens=180,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            response_format={
-                "type": "json_object"
-            },
-        )
-
-    except Exception as e:
-        print(
-            "AI TRANSACTION EXTRACTION ERROR:",
-            repr(e),
-            flush=True,
-        )
-
-        raise ValueError(
-            "AI extraction is temporarily unavailable. "
-            "Please use a clear English/Roman Hinglish voice command "
-            "with supplier, amount and transaction type."
-        )
-
-    if not response.choices:
-        raise ValueError(
-            "AI extractor returned no choices"
-        )
-
-    data = response.choices[0].message.content
-
-    if not data:
-        raise ValueError(
-            "AI extractor returned empty response"
-        )
 
     print(
-        "AI TRANSACTION RAW:",
-        repr(data),
-        flush=True,
+        "AI SUPPLIERS RECEIVED:",
+        len(suppliers),
+        flush=True
     )
 
-    try:
-        transaction = Transaction.model_validate_json(data)
-
-    except Exception as e:
-        print(
-            "AI TRANSACTION VALIDATION ERROR:",
-            repr(e),
-            flush=True,
-        )
-
-        raise ValueError(
-            "AI extractor returned invalid transaction data."
-        )
-
-    return transaction
-
-
-# ============================================================
-# MAIN EXTRACTION
-# ============================================================
-
-def extract_transaction(text: str):
-
-    if not isinstance(text, str):
-        raise ValueError(
-            "Transaction text must be text"
-        )
-
-    text = text.strip()
-
-    if not text:
-        raise ValueError(
-            "Transaction text cannot be empty"
-        )
+    supplier = find_supplier(
+        transaction.supplier_name,
+        suppliers
+    )
 
     # --------------------------------------------------------
-    # FIRST: deterministic local extraction
+    # Supplier not found
     # --------------------------------------------------------
 
-    transaction = local_extract_transaction(text)
-
-    if transaction is not None:
+    if supplier is None:
 
         print(
-            "LOCAL TRANSACTION EXTRACTION USED",
-            flush=True,
+            "SUPPLIER MATCH FAILED:",
+            transaction.supplier_name,
+            flush=True
         )
 
-        transaction.transaction_date = None
-
-        if transaction.amount is not None:
-            if transaction.amount <= 0:
-                transaction.amount = None
-
-        return transaction
-
-    # --------------------------------------------------------
-    # SECOND: AI extraction
-    # --------------------------------------------------------
+        return {
+            "status": "SUPPLIER_NOT_FOUND",
+            "message": (
+                f"Supplier "
+                f"'{transaction.supplier_name}' "
+                "not found in database"
+            ),
+            "supplier_name": (
+                transaction.supplier_name
+            )
+        }
 
     print(
-        "FALLING BACK TO AI TRANSACTION EXTRACTION",
-        flush=True,
+        "SUPPLIER MATCH SUCCESS:",
+        supplier.get("name"),
+        supplier.get("id"),
+        flush=True
     )
 
-    transaction = ai_extract_transaction(text)
+    # --------------------------------------------------------
+    # Validate amount
+    # --------------------------------------------------------
 
-    if not has_explicit_date(text):
-        transaction.transaction_date = None
+    if transaction.amount is None:
 
-    if transaction.amount is not None:
-        if transaction.amount <= 0:
-            transaction.amount = None
+        return {
+            "status": "NEEDS_INFORMATION",
+            "message": "Transaction amount is required"
+        }
 
-    return transaction
+    if float(transaction.amount) <= 0:
+
+        return {
+            "status": "NEEDS_INFORMATION",
+            "message": "Transaction amount must be greater than zero"
+        }
+
+    # --------------------------------------------------------
+    # Transaction date
+    # --------------------------------------------------------
+
+    if transaction.transaction_date:
+
+        transaction_date = (
+            transaction.transaction_date.isoformat()
+        )
+
+    else:
+
+        from datetime import date
+
+        transaction_date = date.today().isoformat()
+
+    # --------------------------------------------------------
+    # Transaction data
+    # --------------------------------------------------------
+
+    data = {
+        "supplier_id": supplier["id"],
+        "transaction_type": (
+            transaction.transaction_type
+        ),
+        "amount": float(transaction.amount),
+        "transaction_date": transaction_date,
+        "reference_number": (
+            transaction.reference_number
+        ),
+        "notes": transaction.notes
+    }
+
+    print(
+        "AI TRANSACTION PAYLOAD:",
+        data,
+        flush=True
+    )
+
+    # --------------------------------------------------------
+    # Send to backend
+    # --------------------------------------------------------
+
+    response = requests.post(
+        f"{BACKEND_URL}/api/v1/transactions",
+        json=data,
+        headers=_headers(token),
+        timeout=20
+    )
+
+    print(
+        "BACKEND TRANSACTION STATUS:",
+        response.status_code,
+        flush=True
+    )
+
+    # --------------------------------------------------------
+    # Duplicate transaction
+    # --------------------------------------------------------
+
+    if response.status_code == 409:
+
+        return {
+            "status": "DUPLICATE_TRANSACTION",
+            "message": "Duplicate transaction detected"
+        }
+
+    # --------------------------------------------------------
+    # Authentication failure
+    # --------------------------------------------------------
+
+    if response.status_code == 401:
+
+        return {
+            "status": "AUTHENTICATION_ERROR",
+            "message": "Authentication token is invalid or expired"
+        }
+
+    # --------------------------------------------------------
+    # Other backend errors
+    # --------------------------------------------------------
+
+    response.raise_for_status()
+
+    result = response.json()
+
+    print(
+        "BACKEND TRANSACTION RESULT:",
+        result,
+        flush=True
+    )
+
+    return result
